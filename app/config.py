@@ -10,10 +10,17 @@ DATA_FOLDER_NAME = "MusicPlayer"
 # To support another format, add its extension here. mutagen reads the tags
 # and QtMultimedia (FFmpeg backend) plays it, e.g. ".flac", ".m4a".
 SUPPORTED_EXTENSIONS = frozenset({".mp3", ".wav", ".ogg"})
+VIDEO_EXTENSIONS = frozenset({
+    ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".mpeg", ".mpg", ".m4v",
+})
 
 
 def is_supported(path: str | Path) -> bool:
     return Path(path).suffix.lower() in SUPPORTED_EXTENSIONS
+
+
+def is_video_supported(path: str | Path) -> bool:
+    return Path(path).suffix.lower() in VIDEO_EXTENSIONS
 
 
 def file_dialog_filter() -> str:

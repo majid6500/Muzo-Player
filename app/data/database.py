@@ -25,6 +25,14 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE tracks ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0;
     """,
+    """
+    CREATE TABLE videos (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        path     TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        title    TEXT NOT NULL,
+        added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 

@@ -4,7 +4,8 @@ from PySide6.QtCore import QStandardPaths, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QColorDialog, QFileDialog, QHBoxLayout, QLabel, QMenu, QProgressBar,
-    QLineEdit, QStackedWidget, QTabBar, QToolButton, QVBoxLayout, QWidget,
+    QLineEdit, QStackedWidget,
+    QTabBar, QToolButton, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
 
@@ -12,12 +13,15 @@ from app.config import file_dialog_filter
 from app.core.audio_backend import PlaybackState
 from app.core.library_service import LibraryService
 from app.core.player_service import PlayerService
+from app.core.video_library_service import VideoLibraryService
 from app.models import Track
 from app.ui.theme import icons, theme
 from app.ui.widgets.buttons import make_push_button, make_tool_button
 from app.ui.widgets.empty_state import EmptyState
 from app.ui.widgets.mini_player import MiniPlayer
-from app.ui.widgets.track_list import TrackListModel, TrackListView
+from app.ui.widgets.track_list import (
+    TrackListModel, TrackListView, TrackRole, VideoTrackListModel,
+)
 from app.utils.formatting import plural
 
 
@@ -33,15 +37,27 @@ class HomeScreen(QWidget):
     """The library: song list, import buttons and a mini player."""
 
     open_play_requested = Signal()
+    open_video_requested = Signal()
+    open_video_path_requested = Signal(str)
     accent_color_selected = Signal(str)
 
-    def __init__(self, library: LibraryService, player: PlayerService, parent=None) -> None:
+    def __init__(
+        self,
+        library: LibraryService,
+        video_library: VideoLibraryService,
+        player: PlayerService,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("Screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._library = library
+        self._video_library = video_library
         self._player = player
         self._model = TrackListModel(self)
+        self._video_model = VideoTrackListModel(self)
+        self._playing_video_path: str | None = None
+        self._video_is_playing = False
         self._last_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.MusicLocation)
 
         self._build_ui()
@@ -79,6 +95,7 @@ class HomeScreen(QWidget):
         self.refresh_theme()
         self._filter_tabs = QTabBar()
         self._filter_tabs.addTab("All songs")
+        self._filter_tabs.addTab("All videos")
         self._filter_tabs.addTab("Favorites")
 
         header = QHBoxLayout()
@@ -90,6 +107,8 @@ class HomeScreen(QWidget):
         header.addWidget(self._remove_button)
         header.addWidget(self._files_button)
         header.addWidget(self._folder_button)
+        self._video_button = make_push_button("Open video", "film")
+        header.addWidget(self._video_button)
         header.addWidget(self._accent_button)
         root.addLayout(header)
 
@@ -138,13 +157,25 @@ class HomeScreen(QWidget):
         self._no_results = QLabel("No matching songs")
         self._no_results.setObjectName("Subtle")
         self._no_results.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._videos_empty = QLabel("No videos yet")
+        self._videos_empty.setObjectName("Subtle")
+        self._videos_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._video_list = TrackListView()
+        self._video_list.setObjectName("VideosList")
+        self._video_list.setModel(self._video_model)
+        self._video_list.remove_requested.connect(self._remove_selected)
         self._list = TrackListView()
         self._list.setModel(self._model)
+        self._video_list.selectionModel().selectionChanged.connect(
+            lambda *_: self._update_actions()
+        )
         self._stack = QStackedWidget()
         self._stack.addWidget(self._empty)
         self._stack.addWidget(self._favorites_empty)
         self._stack.addWidget(self._list)
         self._stack.addWidget(self._no_results)
+        self._stack.addWidget(self._video_list)
+        self._stack.addWidget(self._videos_empty)
         root.addWidget(self._stack, 1)
 
         self._mini_player = MiniPlayer(self._player)
@@ -161,12 +192,14 @@ class HomeScreen(QWidget):
         self._empty.add_files_clicked.connect(self._choose_files)
         self._empty.add_folder_clicked.connect(self._choose_folder)
         self._mini_player.open_requested.connect(self.open_play_requested)
+        self._video_button.clicked.connect(self._on_open_video_clicked)
 
         self._list.track_activated.connect(self._on_track_activated)
         self._list.play_next_requested.connect(self._player.play_next)
         self._list.queue_add_requested.connect(self._player.add_to_queue)
         self._list.remove_requested.connect(self._remove_selected)
         self._list.favorite_toggled.connect(self._on_favorite_toggled)
+        self._video_list.track_activated.connect(self._on_video_activated)
         self._filter_tabs.currentChanged.connect(self._reload_tracks)
         self._search.textChanged.connect(self._reload_tracks)
         self._list.selectionModel().selectionChanged.connect(lambda *_: self._update_actions())
@@ -176,6 +209,14 @@ class HomeScreen(QWidget):
         self._library.import_started.connect(self._on_import_started)
         self._library.import_progress.connect(self._on_import_progress)
         self._library.import_finished.connect(self._on_import_finished)
+        self._video_library.videos_changed.connect(self._reload_videos)
+        self._video_library.import_started.connect(self._on_video_import_started)
+        self._video_library.import_progress.connect(self._on_import_progress)
+        self._video_library.import_finished.connect(self._on_video_import_finished)
+        self._video_library.error_occurred.connect(
+            lambda message: self._progress_label.setText(message)
+        )
+        self._reload_videos()
 
         self._player.current_track_changed.connect(self._on_current_track_changed)
         self._player.state_changed.connect(self._on_playback_state_changed)
@@ -183,8 +224,12 @@ class HomeScreen(QWidget):
 
     # ---- library / player events ----
     def _reload_tracks(self) -> None:
+        if self._filter_tabs.currentIndex() == 1:
+            self._reload_videos()
+            self._update_actions()
+            return
         all_tracks = self._library.tracks()
-        favorites_only = self._filter_tabs.currentIndex() == 1
+        favorites_only = self._filter_tabs.currentIndex() == 2
         query = self._search.text()
         tracks = [
             track for track in all_tracks
@@ -222,6 +267,68 @@ class HomeScreen(QWidget):
         self._model.set_current_id(current.id if current else None)
         self._list.set_playing(self._player.state is PlaybackState.PLAYING)
 
+    def _reload_videos(self) -> None:
+        selected_ids = set(self._video_list.selected_track_ids())
+        query = self._search.text().strip().casefold()
+        all_videos = self._video_library.videos()
+        videos = [
+            video for video in all_videos
+            if query in video.title.casefold()
+        ]
+        self._filter_tabs.setTabText(1, "All videos")
+        if self._filter_tabs.currentIndex() != 1:
+            return
+        self._video_model.set_videos(videos)
+        self._sync_video_playback()
+        for row, video in enumerate(videos):
+            if video.id in selected_ids:
+                index = self._video_model.index(row)
+                self._video_list.selectionModel().select(
+                    index,
+                    self._video_list.selectionModel().SelectionFlag.Select
+                    | self._video_list.selectionModel().SelectionFlag.Rows,
+                )
+
+        self._count_label.setText(f"{len(videos)} videos")
+        self._stack.setCurrentWidget(self._video_list if videos else self._videos_empty)
+        self._update_actions()
+
+    def set_video_playback(self, path: str | None, is_playing: bool) -> None:
+        self._playing_video_path = path
+        self._video_is_playing = is_playing
+        self._sync_video_playback()
+
+    def _sync_video_playback(self) -> None:
+        current_video = next(
+            (
+                video for video in self._video_library.videos()
+                if video.path == self._playing_video_path
+            ),
+            None,
+        )
+        self._video_model.set_current_id(
+            current_video.id if current_video is not None else None
+        )
+        is_playing = self._video_is_playing and current_video is not None
+        self._video_model.set_playing(is_playing)
+        self._video_list.set_playing(is_playing)
+
+    def _on_video_activated(self, video_id: int) -> None:
+        video = self._video_library.get_video(video_id)
+        if video is not None:
+            self.open_video_path_requested.emit(video.path)
+
+    def _on_open_video_clicked(self) -> None:
+        if self._filter_tabs.currentIndex() == 1:
+            selected_ids = self._video_list.selected_track_ids()
+            current_index = self._video_list.currentIndex()
+            if current_index.isValid():
+                selected_ids.insert(0, current_index.data(TrackRole).id)
+            if selected_ids:
+                self._on_video_activated(selected_ids[0])
+                return
+        self.open_video_requested.emit()
+
     def _on_current_track_changed(self, track: Track | None) -> None:
         self._model.set_current_id(track.id if track else None)
         self._list.set_playing(self._player.state is PlaybackState.PLAYING)
@@ -241,6 +348,19 @@ class HomeScreen(QWidget):
         self._progress_box.hide()
         self._set_import_buttons_enabled(True)
 
+    def _on_video_import_started(self) -> None:
+        self._progress_label.setText("Scanning for video files...")
+        self._progress_box.show()
+        self._set_import_buttons_enabled(False)
+
+    def _on_video_import_finished(self, added: int, duplicates: int, unreadable: int) -> None:
+        self._progress_box.hide()
+        self._set_import_buttons_enabled(True)
+        self._progress_label.setText(
+            f"Video import complete: {added} added, {duplicates} already in library, "
+            f"{unreadable} unsupported or unreadable."
+        )
+
     # ---- user actions ----
     def _on_track_activated(self, track_id: int) -> None:
         if self._player.play_track(track_id):
@@ -250,6 +370,15 @@ class HomeScreen(QWidget):
         self._library.set_favorite(track_id, is_favorite)
 
     def _choose_files(self) -> None:
+        if self._filter_tabs.currentIndex() == 1:
+            paths, _ = QFileDialog.getOpenFileNames(
+                self, "Add video files", self._last_dir,
+                "Video files (*.mp4 *.mkv *.avi *.mov *.wmv *.webm *.mpeg *.mpg *.m4v);;All files (*)",
+            )
+            if paths:
+                self._last_dir = paths[0].rsplit("/", 1)[0]
+                self._video_library.add_files(paths)
+            return
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Add audio files", self._last_dir, file_dialog_filter()
         )
@@ -258,15 +387,27 @@ class HomeScreen(QWidget):
             self._library.add_files(paths)
 
     def _choose_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Add a folder of music", self._last_dir)
+        title = (
+            "Add a folder of videos"
+            if self._filter_tabs.currentIndex() == 1
+            else "Add a folder of music"
+        )
+        folder = QFileDialog.getExistingDirectory(self, title, self._last_dir)
         if folder:
             self._last_dir = folder
-            self._library.add_folder(folder)
+            if self._filter_tabs.currentIndex() == 1:
+                self._video_library.add_folder(folder)
+            else:
+                self._library.add_folder(folder)
 
     def _remove_selected(self) -> None:
+        if self._filter_tabs.currentIndex() == 1:
+            video_ids = self._video_list.selected_track_ids()
+            self._video_library.remove_many(video_ids)
+            return
         track_ids = self._list.selected_track_ids()
         if track_ids:
-            if self._filter_tabs.currentIndex() == 1:
+            if self._filter_tabs.currentIndex() == 2:
                 self._library.set_favorites(track_ids, False)
             else:
                 self._library.remove_tracks(track_ids)
@@ -300,8 +441,17 @@ class HomeScreen(QWidget):
         self._empty.set_busy(not enabled)
 
     def _update_actions(self) -> None:
+        if self._filter_tabs.currentIndex() == 1:
+            selected = bool(self._video_list.selected_track_ids())
+            self._remove_button.setText("Remove videos")
+            self._remove_button.setIcon(icons.get_icon("trash"))
+            self._remove_button.setToolTip(
+                "Remove selected videos from the library (files are not deleted)"
+            )
+            self._remove_button.setEnabled(selected)
+            return
         selection = self._list.selectionModel()
-        favorites_only = self._filter_tabs.currentIndex() == 1
+        favorites_only = self._filter_tabs.currentIndex() == 2
         if favorites_only:
             self._remove_button.setText("Remove from favorites")
             self._remove_button.setIcon(icons.get_icon("star", theme.value("accent")))

@@ -1,52 +1,18 @@
 """LibVLC playback backend with its built-in audio equalizer."""
 from __future__ import annotations
 
-import importlib
-import os
-import sys
 from pathlib import Path
 from typing import Sequence
 
 from PySide6.QtCore import QObject, QTimer
 from app.core.audio_backend import AudioBackend, PlaybackState, volume_to_linear
-
-_VLC_DLL_DIRECTORIES = []
-
-
-def _load_vlc_module():
-    if sys.platform == "win32":
-        candidates = [
-            Path(os.environ["VLC_HOME"]) if os.environ.get("VLC_HOME") else None,
-            Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "VideoLAN" / "VLC",
-            Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
-            / "VideoLAN" / "VLC",
-        ]
-        for directory in candidates:
-            if directory is not None and (directory / "libvlc.dll").is_file():
-                _VLC_DLL_DIRECTORIES.append(os.add_dll_directory(str(directory)))
-                plugins = directory / "plugins"
-                if plugins.is_dir():
-                    os.environ.setdefault("VLC_PLUGIN_PATH", str(plugins))
-                break
-
-    try:
-        vlc = importlib.import_module("vlc")
-    except (ImportError, OSError) as exc:
-        raise RuntimeError(
-            "VLC Media Player (64-bit) is required. Install VLC and restart the app."
-        ) from exc
-
-    if not vlc.libvlc_get_version():
-        raise RuntimeError(
-            "VLC Media Player (64-bit) could not be loaded. Install VLC and restart the app."
-        )
-    return vlc
+from app.core.vlc_runtime import load_vlc_module
 
 
 class VlcAudioBackend(AudioBackend):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._vlc = _load_vlc_module()
+        self._vlc = load_vlc_module()
         self._instance = self._vlc.Instance("--no-video", "--quiet")
         if self._instance is None:
             raise RuntimeError("VLC could not initialize its audio engine.")

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QListView, QMenu, QStyle, QStyledItemDelegate,
 )
 
-from app.models import Track
+from app.models import Track, Video
 from app.ui.theme import icons, theme
 from app.utils.formatting import format_time
 
@@ -22,6 +22,7 @@ UnavailableRole = Qt.ItemDataRole.UserRole + 3  # reason text, "" when playable
 FavoriteRole = Qt.ItemDataRole.UserRole + 4
 IsPlayingRole = Qt.ItemDataRole.UserRole + 5
 AnimationPhaseRole = Qt.ItemDataRole.UserRole + 6
+VideoRole = Qt.ItemDataRole.UserRole + 7
 
 
 class TrackListModel(QAbstractListModel):
@@ -55,6 +56,8 @@ class TrackListModel(QAbstractListModel):
             return track.id == self._current_id and self._is_playing
         if role == AnimationPhaseRole:
             return self._animation_phase
+        if role == VideoRole:
+            return False
         if role == Qt.ItemDataRole.ToolTipRole:
             return "Remove from favorites" if track.is_favorite else "Add to favorites"
         return None
@@ -100,6 +103,26 @@ class TrackListModel(QAbstractListModel):
         return reason
 
 
+class VideoTrackListModel(TrackListModel):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._video_ids: set[int] = set()
+
+    def set_videos(self, videos: Sequence[Video]) -> None:
+        self._video_ids = {video.id for video in videos}
+        self.set_tracks([
+            Track(video.id, video.path, video.title, "Video", "", 0)
+            for video in videos
+        ])
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        if role == VideoRole:
+            if not index.isValid() or not 0 <= index.row() < len(self._tracks):
+                return None
+            return self._tracks[index.row()].id in self._video_ids
+        return super().data(index, role)
+
+
 class TrackDelegate(QStyledItemDelegate):
     ROW_HEIGHT = 60
 
@@ -112,6 +135,7 @@ class TrackDelegate(QStyledItemDelegate):
             return
         is_current = bool(index.data(IsCurrentRole))
         is_playing = bool(index.data(IsPlayingRole))
+        is_video = bool(index.data(VideoRole))
         animation_phase = int(index.data(AnimationPhaseRole) or 0)
         unavailable: str = index.data(UnavailableRole) or ""
         is_favorite = bool(index.data(FavoriteRole))
@@ -132,6 +156,9 @@ class TrackDelegate(QStyledItemDelegate):
         elif unavailable:
             icon_name, icon_color = "alert", theme.value("danger")
             painter.drawPixmap(icon_rect, icons.pixmap(icon_name, 64, icon_color))
+        elif is_video:
+            icon_color = theme.value("accent_hover") if is_current else theme.value("text_dim")
+            painter.drawPixmap(icon_rect, icons.pixmap("film", 64, icon_color))
         elif is_current:
             icon_name, icon_color = "volume", theme.value("accent_hover")
             painter.drawPixmap(icon_rect, icons.pixmap(icon_name, 64, icon_color))
@@ -185,14 +212,15 @@ class TrackDelegate(QStyledItemDelegate):
                 format_time(track.duration_ms),
             )
 
-        painter.drawPixmap(
-            favorite_rect,
-            icons.pixmap(
-                "star-filled" if is_favorite else "star",
-                64,
-                theme.value("accent") if is_favorite else theme.value("text_dim"),
-            ),
-        )
+        if not is_video:
+            painter.drawPixmap(
+                favorite_rect,
+                icons.pixmap(
+                    "star-filled" if is_favorite else "star",
+                    64,
+                    theme.value("accent") if is_favorite else theme.value("text_dim"),
+                ),
+            )
         painter.restore()
 
     @staticmethod
@@ -293,7 +321,7 @@ class TrackListView(QListView):
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             index = self.indexAt(event.position().toPoint())
-            if index.isValid() and TrackDelegate.favorite_rect(self.visualRect(index)).contains(
+            if index.isValid() and not index.data(VideoRole) and TrackDelegate.favorite_rect(self.visualRect(index)).contains(
                 event.position().toPoint()
             ):
                 self._favorite_pressed = index
@@ -322,6 +350,15 @@ class TrackListView(QListView):
         if index not in self.selectionModel().selectedIndexes():
             self.setCurrentIndex(index)
         menu = QMenu(self)
+        if index.data(VideoRole):
+            open_action = menu.addAction("Open video")
+            remove_action = menu.addAction("Remove from library")
+            chosen = menu.exec(event.globalPos())
+            if chosen is open_action:
+                self._emit_activated(index)
+            elif chosen is remove_action:
+                self.remove_requested.emit()
+            return
         play_action = menu.addAction("Play")
         track: Track | None = index.data(TrackRole)
         play_next_action = menu.addAction("Play next")

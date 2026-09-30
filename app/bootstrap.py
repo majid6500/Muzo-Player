@@ -11,9 +11,11 @@ from app.core.library_service import LibraryService
 from app.core.player_service import PlayerService
 from app.core.playback_queue import PlaybackQueue
 from app.core.vlc_audio_backend import VlcAudioBackend
+from app.core.video_library_service import VideoLibraryService
 from app.data.database import Database
 from app.data.settings_repository import SettingsRepository
 from app.data.track_repository import TrackRepository
+from app.data.video_repository import VideoRepository
 from app.ui.main_window import MainWindow
 from app.ui.theme import theme
 
@@ -46,13 +48,16 @@ def run() -> int:
         return 1
 
     library = LibraryService(TrackRepository(database))
+    video_library = VideoLibraryService(VideoRepository(database))
     player = PlayerService(backend, library, PlaybackQueue(), settings)
     player.restore_session()
-    window = MainWindow(library, player, settings)
+    window = MainWindow(library, video_library, player, settings)
 
     def shutdown() -> None:
         library.shutdown()
+        video_library.shutdown()
         player.save_state()
+        window.shutdown()
         backend.shutdown()
         database.close()
 

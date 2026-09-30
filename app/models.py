@@ -26,3 +26,20 @@ class Track:
     album: str
     duration_ms: int
     is_favorite: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Video:
+    """A video stored in the local video library."""
+
+    id: int
+    path: str
+    title: str
+
+
+@dataclass(frozen=True, slots=True)
+class NewVideo:
+    """A video found during a library scan."""
+
+    path: str
+    title: str
