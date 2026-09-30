@@ -4,7 +4,10 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import (
     QBrush, QLinearGradient, QPainter, QPainterPath, QPixmap,
 )
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout, QLabel, QMenu, QSlider, QStackedWidget, QTabBar, QToolButton,
+    QVBoxLayout, QWidget, QWidgetAction,
+)
 
 from app.core.audio_backend import PlaybackState
 from app.core.library_service import LibraryService
@@ -15,6 +18,8 @@ from app.ui.theme import icons, theme
 from app.ui.widgets.buttons import make_tool_button
 from app.ui.widgets.elided_label import ElidedLabel
 from app.ui.widgets.equalizer_dialog import EqualizerDialog
+from app.ui.widgets.favorites_panel import FavoritesPanel
+from app.ui.widgets.queue_panel import QueuePanel
 from app.ui.widgets.seek_slider import SeekSlider
 from app.utils.formatting import format_time
 
@@ -48,23 +53,37 @@ class PlayScreen(QWidget):
         root.setSpacing(0)
 
         self._back_button = make_tool_button("arrow-left", "Back to library", size=40)
-        heading = QLabel("Now playing")
-        heading.setObjectName("Subtle")
         top = QHBoxLayout()
         top.addWidget(self._back_button)
         top.addSpacing(8)
-        top.addWidget(heading)
+        self._view_tabs = QTabBar()
+        self._view_tabs.addTab("Now playing")
+        self._view_tabs.addTab("Queue")
+        self._view_tabs.addTab("Favorites")
+        top.addWidget(self._view_tabs)
         top.addStretch()
         self._equalizer_button = make_tool_button("sliders", "Equalizer", size=40)
         self._equalizer_button.setVisible(bool(self._player.equalizer_frequencies))
         top.addWidget(self._equalizer_button)
         root.addLayout(top)
-        root.addStretch(1)
+        self._content_stack = QStackedWidget()
+        self._playback_page = QWidget()
+        self._playback_layout = QVBoxLayout(self._playback_page)
+        self._playback_layout.setContentsMargins(0, 0, 0, 0)
+        self._playback_layout.setSpacing(0)
+        self._queue_panel = QueuePanel(self._library, self._player)
+        self._favorites_panel = FavoritesPanel(self._library, self._player)
+        self._content_stack.addWidget(self._playback_page)
+        self._content_stack.addWidget(self._queue_panel)
+        self._content_stack.addWidget(self._favorites_panel)
+        root.addWidget(self._content_stack, 1)
+        self._update_queue_tab()
 
         self._art = QLabel()
         self._art.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root.addWidget(self._art, 0, Qt.AlignmentFlag.AlignHCenter)
-        root.addSpacing(28)
+        self._playback_layout.addStretch(1)
+        self._playback_layout.addWidget(self._art, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._playback_layout.addSpacing(28)
 
         self._title = ElidedLabel("Nothing playing")
         self._title.setObjectName("TrackTitle")
@@ -72,10 +91,10 @@ class PlayScreen(QWidget):
         self._artist = ElidedLabel()
         self._artist.setObjectName("TrackArtist")
         self._artist.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root.addWidget(self._title)
-        root.addSpacing(4)
-        root.addWidget(self._artist)
-        root.addSpacing(24)
+        self._playback_layout.addWidget(self._title)
+        self._playback_layout.addSpacing(4)
+        self._playback_layout.addWidget(self._artist)
+        self._playback_layout.addSpacing(24)
 
         self._position_label = QLabel("0:00")
         self._position_label.setObjectName("TimeLabel")
@@ -95,8 +114,8 @@ class PlayScreen(QWidget):
         seek_container.setMaximumWidth(CONTENT_MAX_WIDTH)
         seek_container.setLayout(seek_row)
         seek_row.setContentsMargins(0, 0, 0, 0)
-        root.addWidget(seek_container, 0, Qt.AlignmentFlag.AlignHCenter)
-        root.addSpacing(16)
+        self._playback_layout.addWidget(seek_container, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._playback_layout.addSpacing(16)
 
         self._shuffle_button = make_tool_button("shuffle", "Shuffle")
         self._previous_button = make_tool_button("skip-back", "Previous", icon_size=24)
@@ -106,31 +125,41 @@ class PlayScreen(QWidget):
         self._play_button.setObjectName("PlayButton")
         self._next_button = make_tool_button("skip-forward", "Next", icon_size=24)
         self._repeat_button = make_tool_button("repeat", "Repeat: off")
+        self._volume_button = make_tool_button(
+            "volume", "Mute", size=44, icon_size=20, color=theme.value("text_dim")
+        )
+        self._volume_button.setPopupMode(
+            QToolButton.ToolButtonPopupMode.MenuButtonPopup
+        )
+        self._volume_menu = QMenu(self._volume_button)
+        volume_panel = QWidget(self._volume_menu)
+        volume_layout = QVBoxLayout(volume_panel)
+        volume_layout.setContentsMargins(10, 10, 10, 10)
+        volume_layout.setSpacing(8)
+        self._volume_percent = QLabel()
+        self._volume_percent.setObjectName("Subtle")
+        self._volume_percent.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._volume_slider = QSlider(Qt.Orientation.Vertical)
+        self._volume_slider.setRange(0, 100)
+        self._volume_slider.setFixedHeight(126)
+        self._volume_slider.setValue(round(self._player.volume * 100))
+        volume_layout.addWidget(self._volume_percent)
+        volume_layout.addWidget(
+            self._volume_slider, 0, Qt.AlignmentFlag.AlignHCenter
+        )
+        volume_action = QWidgetAction(self._volume_menu)
+        volume_action.setDefaultWidget(volume_panel)
+        self._volume_menu.addAction(volume_action)
+        self._volume_button.setMenu(self._volume_menu)
         controls = QHBoxLayout()
         controls.setSpacing(14)
         controls.addStretch()
         for button in (self._shuffle_button, self._previous_button, self._play_button,
-                       self._next_button, self._repeat_button):
+                       self._next_button, self._repeat_button, self._volume_button):
             controls.addWidget(button)
         controls.addStretch()
-        root.addLayout(controls)
-        root.addSpacing(18)
-
-        volume_icon = QLabel()
-        volume_pixmap = icons.pixmap("volume", 40, theme.value("text_dim")).copy()
-        volume_pixmap.setDevicePixelRatio(2.0)  # 40 px drawn as 20 logical px
-        volume_icon.setPixmap(volume_pixmap)
-        self._volume = SeekSlider()
-        self._volume.setRange(0, 100)
-        self._volume.setFixedWidth(170)
-        volume_row = QHBoxLayout()
-        volume_row.setSpacing(10)
-        volume_row.addStretch()
-        volume_row.addWidget(volume_icon)
-        volume_row.addWidget(self._volume)
-        volume_row.addStretch()
-        root.addLayout(volume_row)
-        root.addStretch(1)
+        self._playback_layout.addLayout(controls)
+        self._playback_layout.addStretch(1)
 
     def _connect_signals(self) -> None:
         player = self._player
@@ -141,17 +170,25 @@ class PlayScreen(QWidget):
         self._next_button.clicked.connect(lambda: player.next())
         self._shuffle_button.clicked.connect(lambda: player.set_shuffle(not player.shuffle_enabled))
         self._repeat_button.clicked.connect(lambda: player.cycle_repeat())
+        self._view_tabs.currentChanged.connect(self._on_view_changed)
+        self._favorites_panel.count_changed.connect(self._update_favorites_tab)
+        self._update_favorites_tab(self._favorites_panel.favorites_count)
 
         self._seek.scrubbed.connect(lambda ms: self._position_label.setText(format_time(ms)))
         self._seek.committed.connect(player.seek)
-        self._volume.scrubbed.connect(lambda value: player.set_volume(value / 100))
+        self._volume_button.clicked.connect(player.toggle_mute)
+        self._volume_slider.valueChanged.connect(
+            lambda value: player.set_volume(value / 100)
+        )
 
         player.current_track_changed.connect(self._on_track_changed)
         player.state_changed.connect(self._on_state_changed)
         player.position_changed.connect(self._on_position_changed)
         player.duration_changed.connect(self._on_duration_changed)
         player.volume_changed.connect(self._on_volume_changed)
+        player.muted_changed.connect(self._on_mute_changed)
         player.modes_changed.connect(self._update_mode_buttons)
+        player.queue_changed.connect(self._update_queue_tab)
         self._library.cover_loaded.connect(self._on_cover_loaded)
 
     def _sync_from_player(self) -> None:
@@ -159,13 +196,28 @@ class PlayScreen(QWidget):
         self._on_state_changed(self._player.state)
         self._on_position_changed(self._player.position)
         self._on_volume_changed(self._player.volume)
+        self._on_mute_changed(self._player.is_muted)
         self._update_mode_buttons()
 
     def _open_equalizer(self) -> None:
         EqualizerDialog(self._player, self).exec()
 
+    def _update_queue_tab(self) -> None:
+        if hasattr(self, "_view_tabs"):
+            count = len(self._player.queue_track_ids)
+            self._view_tabs.setTabText(1, f"Queue ({count})")
+
+    def _update_favorites_tab(self, count: int) -> None:
+        self._view_tabs.setTabText(2, f"Favorites ({count})")
+
+    def _on_view_changed(self, index: int) -> None:
+        self._content_stack.setCurrentIndex(index)
+        if index == 2:
+            self._favorites_panel.focus_list()
+
     def refresh_theme(self) -> None:
         self._on_state_changed(self._player.state)
+        self._on_mute_changed(self._player.is_muted)
         self._update_mode_buttons()
         self._render_art()
 
@@ -206,8 +258,17 @@ class PlayScreen(QWidget):
 
     def _on_volume_changed(self, volume: float) -> None:
         value = round(volume * 100)
-        if not self._volume.is_dragging and self._volume.value() != value:
-            self._volume.setValue(value)
+        if self._volume_slider.value() != value:
+            self._volume_slider.blockSignals(True)
+            self._volume_slider.setValue(value)
+            self._volume_slider.blockSignals(False)
+        self._volume_percent.setText(f"{value}%")
+
+    def _on_mute_changed(self, muted: bool) -> None:
+        icon_name = "volume-muted" if muted else "volume"
+        self._volume_button.setIcon(icons.get_icon(icon_name, theme.value("text_dim")))
+        action = "Unmute" if muted else "Mute"
+        self._volume_button.setToolTip(f"{action}; volume options on arrow")
 
     def _update_mode_buttons(self) -> None:
         shuffle_on = self._player.shuffle_enabled

@@ -8,9 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from PySide6.QtCore import QObject, QTimer
-from PySide6.QtMultimedia import QAudio
-
-from app.core.audio_backend import AudioBackend, PlaybackState
+from app.core.audio_backend import AudioBackend, PlaybackState, volume_to_linear
 
 _VLC_DLL_DIRECTORIES = []
 
@@ -130,12 +128,7 @@ class VlcAudioBackend(AudioBackend):
         self._player.set_time(max(0, int(position_ms)))
 
     def set_volume(self, volume: float) -> None:
-        normalized = min(1.0, max(0.0, float(volume)))
-        linear = QAudio.convertVolume(
-            normalized,
-            QAudio.VolumeScale.LogarithmicVolumeScale,
-            QAudio.VolumeScale.LinearVolumeScale,
-        )
+        linear = volume_to_linear(volume)
         self._player.audio_set_volume(round(linear * 100))
 
     def set_equalizer(self, enabled: bool, gains: Sequence[float]) -> None:

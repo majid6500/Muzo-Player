@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import sqlite3
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QAbstractSpinBox, QApplication, QComboBox, QLineEdit, QMainWindow,
+    QPlainTextEdit, QStackedWidget, QTextEdit,
+)
 
 from app.config import APP_NAME
 from app.core.library_service import LibraryService
@@ -43,6 +48,14 @@ class MainWindow(QMainWindow):
 
         self._toast = Toast(self)
 
+        self._playback_shortcuts = [
+            QShortcut(QKeySequence(Qt.Key.Key_Space), self),
+            QShortcut(QKeySequence(Qt.Key.Key_Minus), self),
+        ]
+        for shortcut in self._playback_shortcuts:
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(self._toggle_playback_shortcut)
+
         self._screens[HOME].open_play_requested.connect(lambda: self.navigate(PLAY))
         self._screens[HOME].accent_color_selected.connect(self._apply_accent_color)
         self._screens[PLAY].back_requested.connect(lambda: self.navigate(HOME))
@@ -55,6 +68,13 @@ class MainWindow(QMainWindow):
 
     def navigate(self, name: str) -> None:
         self._stack.setCurrentWidget(self._screens[name])
+
+    def _toggle_playback_shortcut(self) -> None:
+        focus = QApplication.focusWidget()
+        text_controls = (QAbstractSpinBox, QComboBox, QLineEdit, QPlainTextEdit, QTextEdit)
+        if isinstance(focus, text_controls):
+            return
+        self._screens[PLAY]._player.toggle_play_pause()
 
     def _apply_accent_color(self, value: str) -> None:
         previous = theme.value("accent")

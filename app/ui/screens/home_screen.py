@@ -4,7 +4,7 @@ from PySide6.QtCore import QStandardPaths, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QColorDialog, QFileDialog, QHBoxLayout, QLabel, QMenu, QProgressBar,
-    QStackedWidget, QTabBar, QToolButton, QVBoxLayout, QWidget,
+    QLineEdit, QStackedWidget, QTabBar, QToolButton, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
 
@@ -19,6 +19,14 @@ from app.ui.widgets.empty_state import EmptyState
 from app.ui.widgets.mini_player import MiniPlayer
 from app.ui.widgets.track_list import TrackListModel, TrackListView
 from app.utils.formatting import plural
+
+
+def matches_track_query(track: Track, query: str) -> bool:
+    normalized_query = query.strip().casefold()
+    if not normalized_query:
+        return True
+    searchable_text = " ".join((track.title, track.artist, track.album)).casefold()
+    return normalized_query in searchable_text
 
 
 class HomeScreen(QWidget):
@@ -85,6 +93,21 @@ class HomeScreen(QWidget):
         header.addWidget(self._accent_button)
         root.addLayout(header)
 
+        self._search = QLineEdit()
+        self._search.setObjectName("LibrarySearch")
+        self._search.setPlaceholderText("Search title, artist, or album")
+        self._search.setClearButtonEnabled(True)
+        self._search.setMinimumWidth(220)
+        self._search.setMaximumWidth(360)
+        self._search_action = self._search.addAction(
+            icons.get_icon("search", theme.value("text_dim")),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
+        search_row = QHBoxLayout()
+        search_row.addWidget(self._search)
+        search_row.addStretch()
+        root.addLayout(search_row)
+
         self._progress_box = QWidget()
         progress_layout = QVBoxLayout(self._progress_box)
         progress_layout.setContentsMargins(0, 0, 0, 0)
@@ -112,12 +135,16 @@ class HomeScreen(QWidget):
         favorites_empty_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         favorites_empty_layout.addWidget(favorites_empty_title)
         favorites_empty_layout.addWidget(favorites_empty_subtitle)
+        self._no_results = QLabel("No matching songs")
+        self._no_results.setObjectName("Subtle")
+        self._no_results.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._list = TrackListView()
         self._list.setModel(self._model)
         self._stack = QStackedWidget()
         self._stack.addWidget(self._empty)
         self._stack.addWidget(self._favorites_empty)
         self._stack.addWidget(self._list)
+        self._stack.addWidget(self._no_results)
         root.addWidget(self._stack, 1)
 
         self._mini_player = MiniPlayer(self._player)
@@ -136,9 +163,12 @@ class HomeScreen(QWidget):
         self._mini_player.open_requested.connect(self.open_play_requested)
 
         self._list.track_activated.connect(self._on_track_activated)
+        self._list.play_next_requested.connect(self._player.play_next)
+        self._list.queue_add_requested.connect(self._player.add_to_queue)
         self._list.remove_requested.connect(self._remove_selected)
         self._list.favorite_toggled.connect(self._on_favorite_toggled)
         self._filter_tabs.currentChanged.connect(self._reload_tracks)
+        self._search.textChanged.connect(self._reload_tracks)
         self._list.selectionModel().selectionChanged.connect(lambda *_: self._update_actions())
         self._model.modelReset.connect(self._update_actions)
 
@@ -155,13 +185,22 @@ class HomeScreen(QWidget):
     def _reload_tracks(self) -> None:
         all_tracks = self._library.tracks()
         favorites_only = self._filter_tabs.currentIndex() == 1
-        tracks = [track for track in all_tracks if track.is_favorite] if favorites_only else all_tracks
+        query = self._search.text()
+        tracks = [
+            track for track in all_tracks
+            if (not favorites_only or track.is_favorite)
+            and matches_track_query(track, query)
+        ]
         scrollbar = self._list.verticalScrollBar()
         scroll_position = scrollbar.value()
         self._model.set_tracks(tracks)
         QTimer.singleShot(0, lambda: scrollbar.setValue(scroll_position))
 
-        if favorites_only:
+        if query.strip():
+            self._count_label.setText(
+                plural(len(tracks), "result") if tracks else "No matches"
+            )
+        elif favorites_only:
             self._count_label.setText(
                 plural(len(tracks), "favorite") if tracks else "No favorites yet"
             )
@@ -172,7 +211,11 @@ class HomeScreen(QWidget):
         if not all_tracks:
             self._stack.setCurrentWidget(self._empty)
         elif favorites_only and not tracks:
-            self._stack.setCurrentWidget(self._favorites_empty)
+            self._stack.setCurrentWidget(
+                self._no_results if query.strip() else self._favorites_empty
+            )
+        elif query.strip() and not tracks:
+            self._stack.setCurrentWidget(self._no_results)
         else:
             self._stack.setCurrentWidget(self._list)
         current = self._player.current_track
@@ -239,6 +282,10 @@ class HomeScreen(QWidget):
         accent = theme.value("accent")
         self._accent_button.setIcon(icons.get_icon("droplet", accent))
         self._accent_button.setToolTip(f"Accent color: {accent}")
+        if hasattr(self, "_search"):
+            self._search_action.setIcon(
+                icons.get_icon("search", theme.value("text_dim"))
+            )
         if hasattr(self, "_empty"):
             self._empty.refresh_theme()
         if hasattr(self, "_mini_player"):

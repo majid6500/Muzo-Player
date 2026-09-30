@@ -10,7 +10,12 @@ from enum import Enum
 from typing import Sequence
 
 from PySide6.QtCore import QObject, QUrl, Signal
-from PySide6.QtMultimedia import QAudio, QAudioOutput, QMediaPlayer
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+
+
+def volume_to_linear(volume: float) -> float:
+    """Map the 0-1 volume slider directly to linear output gain."""
+    return min(1.0, max(0.0, float(volume)))
 
 
 class PlaybackState(Enum):
@@ -124,13 +129,7 @@ class QtAudioBackend(AudioBackend):
         self._player.setPosition(max(0, int(position_ms)))
 
     def set_volume(self, volume: float) -> None:
-        volume = min(1.0, max(0.0, volume))
-        linear = QAudio.convertVolume(
-            volume,
-            QAudio.VolumeScale.LogarithmicVolumeScale,
-            QAudio.VolumeScale.LinearVolumeScale,
-        )
-        self._output.setVolume(linear)
+        self._output.setVolume(volume_to_linear(volume))
 
     def _on_state_changed(self, qt_state: QMediaPlayer.PlaybackState) -> None:
         self.state_changed.emit(_STATE_MAP[qt_state])

@@ -32,6 +32,10 @@ class PlaybackQueue:
         return None
 
     @property
+    def track_ids(self) -> tuple[int, ...]:
+        return tuple(self._order)
+
+    @property
     def shuffle_enabled(self) -> bool:
         return self._shuffle
 
@@ -42,19 +46,51 @@ class PlaybackQueue:
     def set_tracks(self, track_ids: Sequence[int]) -> None:
         current = self.current_id
         new_ids = list(track_ids)
+        available = set(new_ids)
+        previous = set(self._ids)
+        order = [track_id for track_id in self._order if track_id in available]
+        added = [track_id for track_id in new_ids if track_id not in previous]
         if self._shuffle:
-            available = set(new_ids)
-            previous = set(self._ids)
-            order = [track_id for track_id in self._order if track_id in available]
-            added = [track_id for track_id in new_ids if track_id not in previous]
             random.shuffle(added)
-            order.extend(added)
-            self._order = order
-            self._position = order.index(current) if current in order else -1
-        else:
-            self._order = new_ids
-            self._position = new_ids.index(current) if current in new_ids else -1
+        order.extend(added)
+        self._order = order
+        self._position = order.index(current) if current in order else -1
         self._ids = new_ids
+
+    def set_order(self, track_ids: Sequence[int]) -> None:
+        new_order = list(track_ids)
+        if len(new_order) != len(self._order) or set(new_order) != set(self._order):
+            raise ValueError("Queue order must contain each queued track exactly once.")
+        current = self.current_id
+        self._order = new_order
+        self._position = new_order.index(current) if current in new_order else -1
+
+    def move_after_current(self, track_id: int) -> bool:
+        if track_id not in self._order:
+            return False
+        current = self.current_id
+        if current is None:
+            self._order.remove(track_id)
+            self._order.insert(0, track_id)
+            return True
+        if track_id == current:
+            return True
+        self._order.remove(track_id)
+        current_position = self._order.index(current)
+        self._order.insert(current_position + 1, track_id)
+        self._position = current_position
+        return True
+
+    def move_to_end(self, track_id: int) -> bool:
+        if track_id not in self._order:
+            return False
+        current = self.current_id
+        if track_id == current:
+            return True
+        self._order.remove(track_id)
+        self._order.append(track_id)
+        self._position = self._order.index(current) if current in self._order else -1
+        return True
 
     def set_shuffle(self, enabled: bool) -> None:
         if enabled != self._shuffle:

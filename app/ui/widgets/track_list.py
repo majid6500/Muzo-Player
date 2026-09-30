@@ -240,6 +240,8 @@ class TrackDelegate(QStyledItemDelegate):
 
 class TrackListView(QListView):
     track_activated = Signal(int)   # track id
+    play_next_requested = Signal(int)
+    queue_add_requested = Signal(int)
     remove_requested = Signal()
     favorite_toggled = Signal(int, bool)  # track id, favorite state
 
@@ -322,6 +324,8 @@ class TrackListView(QListView):
         menu = QMenu(self)
         play_action = menu.addAction("Play")
         track: Track | None = index.data(TrackRole)
+        play_next_action = menu.addAction("Play next")
+        queue_add_action = menu.addAction("Move to end of queue")
         favorite_action = menu.addAction(
             "Remove from favorites" if track and track.is_favorite else "Add to favorites"
         )
@@ -329,6 +333,10 @@ class TrackListView(QListView):
         chosen = menu.exec(event.globalPos())
         if chosen is play_action:
             self._emit_activated(index)
+        elif chosen is play_next_action and track is not None:
+            self.play_next_requested.emit(track.id)
+        elif chosen is queue_add_action and track is not None:
+            self.queue_add_requested.emit(track.id)
         elif chosen is favorite_action and track is not None:
             self.favorite_toggled.emit(track.id, not track.is_favorite)
         elif chosen is remove_action:

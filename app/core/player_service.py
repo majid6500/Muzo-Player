@@ -28,7 +28,9 @@ class PlayerService(QObject):
     position_changed = Signal(int)
     duration_changed = Signal(int)
     volume_changed = Signal(float)
+    muted_changed = Signal(bool)
     modes_changed = Signal()                # shuffle / repeat
+    queue_changed = Signal()
     equalizer_changed = Signal(bool, list)  # enabled, band gains in dB
     track_failed = Signal(int, str)         # track id, short reason
     error_occurred = Signal(str)            # user-facing message
@@ -49,9 +51,12 @@ class PlayerService(QObject):
 
         self._current: Track | None = None
         self._want_playing = False
+        self._track_ended = False
         self._failed_track_id: int | None = None
         self._consecutive_failures = 0
         self._volume = DEFAULT_VOLUME
+        self._last_nonzero_volume = DEFAULT_VOLUME
+        self._muted = False
         self._equalizer_frequencies = backend.equalizer_frequencies
         self._equalizer_presets = backend.equalizer_presets
         self._equalizer_enabled = False
@@ -86,12 +91,20 @@ class PlayerService(QObject):
         return self._volume
 
     @property
+    def is_muted(self) -> bool:
+        return self._muted or self._volume == 0
+
+    @property
     def shuffle_enabled(self) -> bool:
         return self._queue.shuffle_enabled
 
     @property
     def repeat_mode(self) -> RepeatMode:
         return self._queue.repeat_mode
+
+    @property
+    def queue_track_ids(self) -> tuple[int, ...]:
+        return self._queue.track_ids
 
     @property
     def equalizer_frequencies(self) -> tuple[float, ...]:
@@ -115,6 +128,7 @@ class PlayerService(QObject):
         current = self._current
         if current and current.id == track_id and self._failed_track_id != track_id:
             self._want_playing = True
+            self._rewind_if_ended()
             if self.state is not PlaybackState.PLAYING:
                 self._backend.play()
             return True
@@ -137,6 +151,7 @@ class PlayerService(QObject):
             self._consecutive_failures = 0
             self._start(self._current.id)
             return
+        self._rewind_if_ended()
         self._want_playing = True
         self._backend.play()
 
@@ -170,8 +185,23 @@ class PlayerService(QObject):
 
     def set_volume(self, volume: float) -> None:
         self._volume = min(1.0, max(0.0, volume))
-        self._backend.set_volume(self._volume)
+        if self._volume > 0:
+            self._last_nonzero_volume = self._volume
+            self._muted = False
+        self._backend.set_volume(0.0 if self._muted else self._volume)
         self.volume_changed.emit(self._volume)
+        self.muted_changed.emit(self.is_muted)
+
+    def toggle_mute(self) -> None:
+        if self.is_muted:
+            if self._volume == 0:
+                self._volume = self._last_nonzero_volume or DEFAULT_VOLUME
+            self._muted = False
+        else:
+            self._muted = True
+        self._backend.set_volume(0.0 if self.is_muted else self._volume)
+        self.volume_changed.emit(self._volume)
+        self.muted_changed.emit(self.is_muted)
 
     def set_equalizer(
         self, *, enabled: bool | None = None, gains: Sequence[float] | None = None
@@ -198,6 +228,23 @@ class PlayerService(QObject):
     def set_shuffle(self, enabled: bool) -> None:
         self._queue.set_shuffle(enabled)
         self.modes_changed.emit()
+        self.queue_changed.emit()
+
+    def set_queue_order(self, track_ids: Sequence[int]) -> None:
+        self._queue.set_order(track_ids)
+        self.queue_changed.emit()
+
+    def play_next(self, track_id: int) -> bool:
+        moved = self._queue.move_after_current(track_id)
+        if moved:
+            self.queue_changed.emit()
+        return moved
+
+    def add_to_queue(self, track_id: int) -> bool:
+        moved = self._queue.move_to_end(track_id)
+        if moved:
+            self.queue_changed.emit()
+        return moved
 
     def cycle_repeat(self) -> None:
         order = [RepeatMode.OFF, RepeatMode.ALL, RepeatMode.ONE]
@@ -212,6 +259,9 @@ class PlayerService(QObject):
             self.set_volume(float(self._settings.get("volume", str(DEFAULT_VOLUME))))
         except ValueError:
             self.set_volume(DEFAULT_VOLUME)
+        self._muted = self._settings.get("muted") == "1"
+        self._backend.set_volume(0.0 if self.is_muted else self._volume)
+        self.muted_changed.emit(self.is_muted)
         self._queue.set_shuffle(self._settings.get("shuffle") == "1")
         try:
             self._queue.set_repeat(RepeatMode(self._settings.get("repeat", "off")))
@@ -241,6 +291,7 @@ class PlayerService(QObject):
 
     def save_state(self) -> None:
         self._settings.set("volume", f"{self._volume:.3f}")
+        self._settings.set("muted", "1" if self._muted else "0")
         self._settings.set("shuffle", "1" if self._queue.shuffle_enabled else "0")
         self._settings.set("repeat", self._queue.repeat_mode.value)
         self._settings.set("equalizer_enabled", "1" if self._equalizer_enabled else "0")
@@ -253,6 +304,7 @@ class PlayerService(QObject):
         if track is None:
             return False
         self._failed_track_id = None
+        self._track_ended = False
         if sync_queue:
             self._queue.set_current(track_id)
         self._current = track
@@ -308,12 +360,17 @@ class PlayerService(QObject):
         next_id = self._queue.next_id(auto=True)
         if next_id is None:
             self._want_playing = False
+            self._track_ended = True
             self._backend.stop()
-        elif self._current and next_id == self._current.id:
-            self._backend.seek(0)
-            self._backend.play()
         else:
             self._start(next_id, sync_queue=False)
+
+    def _rewind_if_ended(self) -> None:
+        if not self._track_ended:
+            return
+        self._backend.seek(0)
+        self._track_ended = False
+        self.position_changed.emit(0)
 
     def _on_backend_error(self, message: str) -> None:
         if self._current is not None:
@@ -325,6 +382,7 @@ class PlayerService(QObject):
 
     def _on_library_changed(self) -> None:
         self._queue.set_tracks([t.id for t in self._library.tracks()])
+        self.queue_changed.emit()
         if self._current and self._library.get_track(self._current.id) is None:
             self._want_playing = False
             self._failed_track_id = None

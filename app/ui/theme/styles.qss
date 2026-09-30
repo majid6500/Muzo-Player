@@ -49,6 +49,14 @@ QFrame#MiniPlayer {
 }
 
 QListView { background: transparent; border: none; }
+QListWidget#QueueList { background: transparent; border: none; }
+QListWidget#QueueList::item { padding: 12px 10px; border-radius: 6px; }
+QListWidget#QueueList::item:hover { background: $hover; }
+QListWidget#QueueList::item:selected { background: $selection; color: $text; }
+QListWidget#FavoriteList { background: transparent; border: none; }
+QListWidget#FavoriteList::item { padding: 12px 10px; border-radius: 6px; }
+QListWidget#FavoriteList::item:hover { background: $hover; }
+QListWidget#FavoriteList::item:selected { background: $selection; color: $text; }
 QTabBar::tab {
     background: transparent; color: $text_dim; border: 1px solid transparent;
     border-radius: 6px; padding: 8px 14px;
@@ -64,8 +72,8 @@ QSlider::handle:horizontal {
 QSlider::handle:horizontal:hover { background: $accent_hover; }
 QSlider:disabled::sub-page:horizontal { background: $border; }
 QSlider::groove:vertical { width: 6px; background: $border; border-radius: 3px; }
-QSlider::sub-page:vertical { background: $accent; border-radius: 3px; }
-QSlider::add-page:vertical { background: $border; border-radius: 3px; }
+QSlider::sub-page:vertical { background: $border; border-radius: 3px; }
+QSlider::add-page:vertical { background: $accent; border-radius: 3px; }
 QSlider::handle:vertical {
     background: #ffffff; width: 14px; height: 14px; margin: 0 -4px; border-radius: 7px;
 }
@@ -76,6 +84,11 @@ QComboBox {
 }
 QComboBox:hover { border-color: $accent; }
 QComboBox QAbstractItemView { background: $surface_alt; selection-background-color: $selection; }
+QLineEdit#LibrarySearch {
+    background: $surface; border: 1px solid $border; border-radius: 8px;
+    padding: 8px 10px; selection-background-color: $selection;
+}
+QLineEdit#LibrarySearch:focus { border-color: $accent; }
 QCheckBox::indicator {
     width: 16px; height: 16px; border: 1px solid $border; border-radius: 4px; background: $surface_alt;
 }
