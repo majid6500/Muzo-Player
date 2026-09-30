@@ -1,0 +1,26 @@
+# Virtual environment
+.venv/
+
+# Python cache
+pycache/
+*.py[cod]
+*$py.class
+
+# IDE
+.idea/
+
+# Build / distribution
+build/
+dist/
+*.egg-info/
+
+# PyInstaller
+*.spec
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*

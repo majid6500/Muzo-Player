@@ -1,0 +1,88 @@
+"""Inline SVG icons (Feather-style, MIT) rendered to QIcon/QPixmap."""
+from __future__ import annotations
+
+from functools import lru_cache
+
+from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
+
+from app.ui.theme import theme
+
+# "COLOR" is replaced with the requested color (used for filled shapes).
+_ICONS: dict[str, str] = {
+    "play": '<polygon points="7 4 20 12 7 20 7 4" fill="COLOR"/>',
+    "pause": '<rect x="6" y="4" width="4" height="16" rx="1" fill="COLOR"/>'
+             '<rect x="14" y="4" width="4" height="16" rx="1" fill="COLOR"/>',
+    "skip-back": '<polygon points="19 20 9 12 19 4 19 20" fill="COLOR"/>'
+                 '<line x1="5" y1="19" x2="5" y2="5"/>',
+    "skip-forward": '<polygon points="5 4 15 12 5 20 5 4" fill="COLOR"/>'
+                    '<line x1="19" y1="5" x2="19" y2="19"/>',
+    "shuffle": '<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>'
+               '<polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>'
+               '<line x1="4" y1="4" x2="9" y2="9"/>',
+    "sliders": '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>'
+               '<line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>'
+               '<line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>'
+               '<line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/>'
+               '<line x1="18" y1="16" x2="22" y2="16"/>',
+    "repeat": '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>'
+              '<polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
+    "repeat-one": '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>'
+                  '<polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>'
+                  '<path d="M11 10h1v4"/>',
+    "volume": '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>'
+              '<path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>',
+    "arrow-left": '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
+    "folder-plus": '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'
+                   '<line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/>',
+    "file-plus": '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+                 '<polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/>'
+                 '<line x1="9" y1="15" x2="15" y2="15"/>',
+    "trash": '<polyline points="3 6 5 6 21 6"/>'
+             '<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>'
+             '<path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
+    "music": '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+    "star": '<polygon points="12 2 15.1 8.5 22 9.3 17 14.1 18.2 21 12 17.7 5.8 21 7 14.1 2 9.3 8.9 8.5 12 2"/>',
+    "star-filled": '<polygon points="12 2 15.1 8.5 22 9.3 17 14.1 18.2 21 12 17.7 5.8 21 7 14.1 2 9.3 8.9 8.5 12 2" fill="COLOR"/>',
+    "droplet": '<path d="M12 22a8 8 0 0 0 8-8c0-4.4-8-12-8-12S4 9.6 4 14a8 8 0 0 0 8 8z"/>',
+    "alert": '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>'
+             '<line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+}
+
+_RENDER_SIZE = 96
+
+
+@lru_cache(maxsize=512)
+def _render(name: str, color: str, size: int) -> QPixmap:
+    body = _ICONS[name].replace("COLOR", color)
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+        f'stroke="{color}" stroke-width="2" stroke-linecap="round" '
+        f'stroke-linejoin="round">{body}</svg>'
+    )
+    renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    renderer.render(painter)
+    painter.end()
+    return pixmap
+
+
+def pixmap(name: str, size: int, color: str | None = None) -> QPixmap:
+    """A square pixmap of `size` device pixels."""
+    return _render(name, color or theme.value("text"), size)
+
+
+@lru_cache(maxsize=256)
+def _build_icon(name: str, color: str, disabled_color: str) -> QIcon:
+    icon = QIcon()
+    icon.addPixmap(_render(name, color, _RENDER_SIZE), QIcon.Mode.Normal)
+    icon.addPixmap(_render(name, color, _RENDER_SIZE), QIcon.Mode.Active)
+    icon.addPixmap(_render(name, disabled_color, _RENDER_SIZE), QIcon.Mode.Disabled)
+    return icon
+
+
+def get_icon(name: str, color: str | None = None) -> QIcon:
+    return _build_icon(name, color or theme.value("text"), theme.value("text_dim"))
