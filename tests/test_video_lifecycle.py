@@ -8,7 +8,10 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, QEventLoop, QItemSelectionModel, Signal, QTimer
+from PySide6.QtCore import (
+    QObject, QEventLoop, QItemSelectionModel, QPoint, Qt, Signal, QTimer,
+)
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from app.core.audio_backend import PlaybackState
@@ -44,6 +47,12 @@ class FakeLibrary(QObject):
     def get_cover(self, _track_id: int) -> None:
         return None
 
+    def add_folder(self, _folder: str) -> None:
+        pass
+
+    def add_files(self, _paths) -> None:
+        pass
+
 
 class FakeVideoBackend(QObject):
     position_changed = Signal(int)
@@ -57,6 +66,8 @@ class FakeVideoBackend(QObject):
         self._state = PlaybackState.STOPPED
         self.toggle_count = 0
         self.stopped = False
+        self.added_subtitles: list[str] = []
+        self.subtitles_disabled = 0
 
     @property
     def state(self) -> PlaybackState:
@@ -68,6 +79,14 @@ class FakeVideoBackend(QObject):
 
     def set_volume(self, _volume: float) -> None:
         pass
+
+    def add_subtitle(self, path: str) -> bool:
+        self.added_subtitles.append(path)
+        return True
+
+    def disable_subtitles(self) -> bool:
+        self.subtitles_disabled += 1
+        return True
 
     def toggle_play_pause(self) -> None:
         self.toggle_count += 1
@@ -147,7 +166,6 @@ class VideoLifecycleTests(unittest.TestCase):
         )
         self.assertEqual(window.width(), 1180)
         self.assertEqual(window.minimumWidth(), 980)
-        home._filter_tabs.setCurrentIndex(1)
         video_path = Path(self.temp_dir.name) / "library-video.mp4"
         video_path.touch()
         with patch(
@@ -156,6 +174,8 @@ class VideoLifecycleTests(unittest.TestCase):
         ):
             self._wait_for_video_import(home._choose_files)
 
+        self.assertEqual(len(self.video_library.videos()), 1)
+        home._filter_tabs.setCurrentIndex(1)
         video_list = home._video_list
         self.assertIsInstance(video_list.itemDelegate(), TrackDelegate)
         self.assertEqual(home._video_model.rowCount(), 1)
@@ -202,8 +222,13 @@ class VideoLifecycleTests(unittest.TestCase):
         self.player.play_track(1)
 
         window = self._open_video()
+        self._wait_for_video_import(lambda: None)
 
         self.assertIs(window._stack.currentWidget(), window._video_screen)
+        self.assertEqual(
+            [video.path for video in self.video_library.videos()],
+            [str(Path(self.video_path).resolve())],
+        )
         self.assertEqual(self.player.state, PlaybackState.PAUSED)
         window._toggle_playback_shortcut()
         self.assertEqual(self.player.state, PlaybackState.PAUSED)
@@ -235,6 +260,73 @@ class VideoLifecycleTests(unittest.TestCase):
 
         self.assertFalse(window.isFullScreen())
         self.assertIs(window._stack.currentWidget(), window._screens["home"])
+
+    def test_video_loads_sidecar_subtitle_and_supports_manual_off(self) -> None:
+        video_path = Path(self.video_path)
+        sidecar = video_path.with_suffix(".srt")
+        sidecar.touch()
+        manual_subtitle = Path(self.temp_dir.name) / "custom.ass"
+        manual_subtitle.touch()
+
+        window = self._open_video()
+        backend = window._video_screen._backend
+        self.assertEqual(backend.added_subtitles, [str(sidecar.resolve())])
+        self.assertEqual(window._video_screen._status.text(), "Subtitles: movie.srt")
+
+        with patch(
+            "app.ui.screens.video_screen.QFileDialog.getOpenFileName",
+            return_value=(str(manual_subtitle), ""),
+        ):
+            window._video_screen._choose_subtitle()
+        self.assertEqual(
+            backend.added_subtitles,
+            [str(sidecar.resolve()), str(manual_subtitle.resolve())],
+        )
+
+        window._video_screen._disable_subtitles()
+        self.assertEqual(backend.subtitles_disabled, 1)
+        self.assertEqual(window._video_screen._status.text(), "Subtitles off")
+
+    def test_immersive_mode_hides_and_restores_controls(self) -> None:
+        window = self._open_video()
+        window.show()
+        screen = window._video_screen
+        window._video_screen._enter_immersive()
+        self.app.processEvents()
+
+        self.assertTrue(screen._immersive)
+        self.assertTrue(window.isFullScreen())
+        self.assertTrue(screen._overlay.isVisible())
+        self.assertTrue(screen._back_button.isHidden())
+        self.assertTrue(screen._seek.isHidden())
+
+        screen._hide_immersive_controls()
+        self.assertFalse(screen._overlay.isVisible())
+        with patch(
+            "app.ui.screens.video_screen.QCursor.pos",
+            return_value=QPoint(100, 100),
+        ):
+            screen._watch_cursor()
+        self.assertTrue(screen._overlay.isVisible())
+
+        screen._overlay._exit.click()
+        self.app.processEvents()
+        self.assertFalse(screen._immersive)
+        self.assertFalse(window.isFullScreen())
+        self.assertFalse(screen._back_button.isHidden())
+        self.assertFalse(screen._seek.isHidden())
+
+    def test_escape_exits_immersive_mode(self) -> None:
+        window = self._open_video()
+        window.show()
+        screen = window._video_screen
+        screen._enter_immersive()
+        self.app.processEvents()
+
+        QTest.keyClick(screen, Qt.Key.Key_Escape)
+
+        self.assertFalse(screen._immersive)
+        self.assertFalse(window.isFullScreen())
 
 
 if __name__ == "__main__":

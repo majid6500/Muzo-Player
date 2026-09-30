@@ -7,6 +7,9 @@
 
 QMainWindow, QStackedWidget, QWidget#Screen { background: $bg; }
 QWidget#VideoSurface { background: #000000; }
+QWidget#VideoOverlay {
+    background: rgba(16, 19, 17, 225); border: 1px solid $border; border-radius: 10px;
+}
 QDialog { background: $bg; }
 QLabel { background: transparent; }
 QLabel#ScreenTitle { font-size: 28px; font-weight: 700; }

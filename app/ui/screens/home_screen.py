@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from app.config import file_dialog_filter
+from app.config import is_supported, is_video_supported, media_file_dialog_filter
 from app.core.audio_backend import PlaybackState
 from app.core.library_service import LibraryService
 from app.core.player_service import PlayerService
@@ -54,6 +54,7 @@ class HomeScreen(QWidget):
         self._library = library
         self._video_library = video_library
         self._player = player
+        self._active_imports = 0
         self._model = TrackListModel(self)
         self._video_model = VideoTrackListModel(self)
         self._playing_video_path: str | None = None
@@ -337,6 +338,7 @@ class HomeScreen(QWidget):
         self._list.set_playing(state is PlaybackState.PLAYING)
 
     def _on_import_started(self) -> None:
+        self._active_imports += 1
         self._progress_label.setText("Scanning for audio files\u2026")
         self._progress_box.show()
         self._set_import_buttons_enabled(False)
@@ -345,21 +347,26 @@ class HomeScreen(QWidget):
         self._progress_label.setText(f"Reading songs\u2026 {processed} files processed")
 
     def _on_import_finished(self, *_counts: int) -> None:
-        self._progress_box.hide()
-        self._set_import_buttons_enabled(True)
+        self._finish_import_ui()
 
     def _on_video_import_started(self) -> None:
+        self._active_imports += 1
         self._progress_label.setText("Scanning for video files...")
         self._progress_box.show()
         self._set_import_buttons_enabled(False)
 
     def _on_video_import_finished(self, added: int, duplicates: int, unreadable: int) -> None:
-        self._progress_box.hide()
-        self._set_import_buttons_enabled(True)
+        self._finish_import_ui()
         self._progress_label.setText(
             f"Video import complete: {added} added, {duplicates} already in library, "
             f"{unreadable} unsupported or unreadable."
         )
+
+    def _finish_import_ui(self) -> None:
+        self._active_imports = max(0, self._active_imports - 1)
+        if self._active_imports == 0:
+            self._progress_box.hide()
+            self._set_import_buttons_enabled(True)
 
     # ---- user actions ----
     def _on_track_activated(self, track_id: int) -> None:
@@ -370,35 +377,26 @@ class HomeScreen(QWidget):
         self._library.set_favorite(track_id, is_favorite)
 
     def _choose_files(self) -> None:
-        if self._filter_tabs.currentIndex() == 1:
-            paths, _ = QFileDialog.getOpenFileNames(
-                self, "Add video files", self._last_dir,
-                "Video files (*.mp4 *.mkv *.avi *.mov *.wmv *.webm *.mpeg *.mpg *.m4v);;All files (*)",
-            )
-            if paths:
-                self._last_dir = paths[0].rsplit("/", 1)[0]
-                self._video_library.add_files(paths)
-            return
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Add audio files", self._last_dir, file_dialog_filter()
+            self, "Add media files", self._last_dir, media_file_dialog_filter()
         )
         if paths:
             self._last_dir = paths[0].rsplit("/", 1)[0]
-            self._library.add_files(paths)
+            audio_paths = [path for path in paths if is_supported(path)]
+            video_paths = [path for path in paths if is_video_supported(path)]
+            if audio_paths:
+                self._library.add_files(audio_paths)
+            if video_paths:
+                self._video_library.add_files(video_paths)
 
     def _choose_folder(self) -> None:
-        title = (
-            "Add a folder of videos"
-            if self._filter_tabs.currentIndex() == 1
-            else "Add a folder of music"
+        folder = QFileDialog.getExistingDirectory(
+            self, "Add a folder of media", self._last_dir
         )
-        folder = QFileDialog.getExistingDirectory(self, title, self._last_dir)
         if folder:
             self._last_dir = folder
-            if self._filter_tabs.currentIndex() == 1:
-                self._video_library.add_folder(folder)
-            else:
-                self._library.add_folder(folder)
+            self._library.add_folder(folder)
+            self._video_library.add_folder(folder)
 
     def _remove_selected(self) -> None:
         if self._filter_tabs.currentIndex() == 1:

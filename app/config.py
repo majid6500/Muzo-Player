@@ -28,6 +28,15 @@ def file_dialog_filter() -> str:
     return f"Audio files ({patterns});;All files (*)"
 
 
+def media_file_dialog_filter() -> str:
+    audio_patterns = " ".join(f"*{ext}" for ext in sorted(SUPPORTED_EXTENSIONS))
+    video_patterns = " ".join(f"*{ext}" for ext in sorted(VIDEO_EXTENSIONS))
+    return (
+        f"Media files ({audio_patterns} {video_patterns});;"
+        f"Audio files ({audio_patterns});;Video files ({video_patterns});;All files (*)"
+    )
+
+
 def data_directory() -> Path:
     base = os.environ.get("APPDATA") or str(Path.home())
     folder = Path(base) / DATA_FOLDER_NAME

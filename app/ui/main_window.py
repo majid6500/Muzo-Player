@@ -107,7 +107,7 @@ class MainWindow(QMainWindow):
         self._open_video_path(path)
 
     def _open_video_path(self, path: str) -> None:
-
+        self._video_library.add_files([path])
         if self._video_screen is None:
             try:
                 self._video_screen = VideoScreen(VlcVideoBackend(), self)

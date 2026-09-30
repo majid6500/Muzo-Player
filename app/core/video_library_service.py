@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import os
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -44,7 +45,15 @@ class VideoLibraryService(QObject):
     def add_files(self, paths: Iterable[str]) -> None:
         if self._reject_if_busy():
             return
-        self._start_import(VideoScanWorker(files=[Path(path) for path in paths]))
+        known_paths = {
+            os.path.normcase(os.path.abspath(video.path)) for video in self._videos
+        }
+        new_paths = [
+            Path(path) for path in paths
+            if os.path.normcase(os.path.abspath(path)) not in known_paths
+        ]
+        if new_paths:
+            self._start_import(VideoScanWorker(files=new_paths))
 
     def add_folder(self, folder: str) -> None:
         if self._reject_if_busy():

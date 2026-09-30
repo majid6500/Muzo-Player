@@ -78,6 +78,30 @@ class VlcVideoBackend(QObject):
             return False
         return True
 
+    def add_subtitle(self, path: str) -> bool:
+        subtitle_path = Path(path).resolve()
+        if not subtitle_path.is_file():
+            self.error_occurred.emit("Subtitle file was not found.")
+            return False
+        if self._media is None:
+            self.error_occurred.emit("Open a video before loading subtitles.")
+            return False
+        result = self._player.add_slave(
+            self._vlc.MediaSlaveType.subtitle,
+            subtitle_path.as_uri(),
+            True,
+        )
+        if result < 0:
+            self.error_occurred.emit("VLC could not load this subtitle file.")
+            return False
+        return True
+
+    def disable_subtitles(self) -> bool:
+        if self._player.video_set_spu(-1) < 0:
+            self.error_occurred.emit("VLC could not turn subtitles off.")
+            return False
+        return True
+
     def play(self) -> None:
         if self._ended:
             self._player.set_time(0)
