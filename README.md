@@ -23,8 +23,8 @@ Supported import extensions:
 ## Run from source
 
 Requirements: Windows 10/11 (64-bit), Python 3.11 or newer, and 64-bit VLC
-Media Player. VLC supplies the audio/video engine and equalizer and must be
-installed on the computer where Muzo Player runs.
+Media Player. VLC supplies the audio/video engine and equalizer. In development,
+install 64-bit VLC or set `VLC_HOME` to the folder containing `libvlc.dll`.
 
 ```powershell
 py -3.11 -m venv .venv
@@ -33,22 +33,23 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-If VLC is installed in a non-standard directory, set `VLC_HOME` to the folder
-containing `libvlc.dll` before starting the app.
-
 ## Portable Windows build
 
-The release executable is a single-file PyInstaller build. It does not include
-VLC; install 64-bit VLC on the target computer before using the player.
+The single-file PyInstaller build includes the official 64-bit VLC runtime and
+plugins. The build uses a matching local VLC runtime when available; otherwise,
+it downloads the version pinned in `vlc-runtime-version.txt` from VideoLAN's
+official download service. The runtime is cached in `.vlc-runtime`. End users
+do not need VLC installed separately.
 
 ```powershell
 python -m pip install -r requirements-build.txt
 .\build_portable.ps1
 ```
 
-The output is `dist\Muzo Player.exe`. The build is local and is not uploaded by
-the build script. For a release, publish it separately as a GitHub release
-asset when ready.
+The output is `dist\Muzo Player.exe`. The bundled VLC files are embedded in that
+executable and extracted to PyInstaller's temporary `_MEIPASS\vlc` directory
+at launch. The build is local and is not uploaded by the build script. For a
+release, publish it separately as a GitHub release asset when ready.
 
 ## Data location
 

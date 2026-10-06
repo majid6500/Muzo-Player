@@ -13,6 +13,7 @@ pycache/
 build/
 dist/
 *.egg-info/
+.vlc-runtime/
 
 # OS files
 .DS_Store

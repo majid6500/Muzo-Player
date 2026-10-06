@@ -1,5 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
 from PyInstaller.utils.win32.versioninfo import (
     FixedFileInfo,
     StringFileInfo,
@@ -9,6 +11,34 @@ from PyInstaller.utils.win32.versioninfo import (
     VarStruct,
     VSVersionInfo,
 )
+
+project_root = Path(SPECPATH)
+vlc_version = (project_root / "vlc-runtime-version.txt").read_text(
+    encoding="ascii"
+).strip()
+vlc_runtime = project_root / ".vlc-runtime" / vlc_version
+required_vlc_files = (
+    vlc_runtime / "libvlc.dll",
+    vlc_runtime / "libvlccore.dll",
+    vlc_runtime / "plugins",
+)
+if not all(path.exists() for path in required_vlc_files):
+    raise FileNotFoundError(
+        f"VLC {vlc_version} runtime not found at {vlc_runtime}. "
+        "Run build_portable.ps1 to download the official 64-bit runtime."
+    )
+
+vlc_binaries = []
+vlc_datas = []
+for path in vlc_runtime.rglob("*"):
+    if not path.is_file() or path.suffix.lower() == ".exe":
+        continue
+    destination = (Path("vlc") / path.relative_to(vlc_runtime).parent).as_posix()
+    item = (str(path), destination)
+    if path.suffix.lower() == ".dll":
+        vlc_binaries.append(item)
+    else:
+        vlc_datas.append(item)
 
 version = (1, 0, 0, 0)
 version_text = ".".join(str(part) for part in version[:3])
@@ -47,12 +77,12 @@ version_info = VSVersionInfo(
 a = Analysis(
     ["main.py"],
     pathex=[],
-    binaries=[],
+    binaries=vlc_binaries,
     datas=[
         ("Muzo Player.ico", "."),
         ("app/assets/logo.png", "app/assets"),
         ("app/ui/theme/styles.qss", "app/ui/theme"),
-    ],
+    ] + vlc_datas,
     hiddenimports=["vlc"],
     hookspath=[],
     hooksconfig={},
