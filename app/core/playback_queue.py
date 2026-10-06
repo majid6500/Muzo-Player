@@ -57,6 +57,16 @@ class PlaybackQueue:
         self._position = order.index(current) if current in order else -1
         self._ids = new_ids
 
+    def replace_tracks(self, track_ids: Sequence[int]) -> None:
+        new_ids = list(dict.fromkeys(track_ids))
+        current = self.current_id
+        order = list(new_ids)
+        if self._shuffle:
+            random.shuffle(order)
+        self._ids = new_ids
+        self._order = order
+        self._position = order.index(current) if current in order else -1
+
     def set_order(self, track_ids: Sequence[int]) -> None:
         new_order = list(track_ids)
         if len(new_order) != len(self._order) or set(new_order) != set(self._order):

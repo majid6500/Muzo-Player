@@ -242,6 +242,21 @@ class PlayerServiceTests(unittest.TestCase):
 
         self.assertEqual(self.player.current_track, self.tracks[2])
 
+    def test_playing_collection_limits_queue_then_library_play_restores_it(self) -> None:
+        self.assertTrue(self.player.play_tracks([3, 1]))
+        self.assertEqual(self.player.queue_track_ids, (3, 1))
+        self.assertEqual(self.player.current_track, self.tracks[2])
+
+        self.backend.finished.emit()
+        self.assertEqual(self.player.current_track, self.tracks[0])
+        self.backend.finished.emit()
+        self.assertEqual(self.backend.state, PlaybackState.STOPPED)
+
+        self.assertTrue(self.player.play_track(2))
+        self.assertEqual(self.player.queue_track_ids, (1, 2, 3))
+        self.backend.finished.emit()
+        self.assertEqual(self.player.current_track, self.tracks[2])
+
     def test_mute_preserves_volume_and_restores_saved_state(self) -> None:
         self.player.set_volume(0.42)
         self.player.toggle_mute()

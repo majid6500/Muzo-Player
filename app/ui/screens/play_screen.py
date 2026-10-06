@@ -18,13 +18,11 @@ from app.ui.theme import icons, theme
 from app.ui.widgets.buttons import make_tool_button
 from app.ui.widgets.elided_label import ElidedLabel
 from app.ui.widgets.equalizer_dialog import EqualizerDialog
-from app.ui.widgets.favorites_panel import FavoritesPanel
 from app.ui.widgets.queue_panel import QueuePanel
 from app.ui.widgets.seek_slider import SeekSlider
 from app.utils.formatting import format_time
 
 ART_RADIUS = 20
-CONTENT_MAX_WIDTH = 640
 
 
 class PlayScreen(QWidget):
@@ -32,7 +30,9 @@ class PlayScreen(QWidget):
 
     back_requested = Signal()
 
-    def __init__(self, library: LibraryService, player: PlayerService, parent=None) -> None:
+    def __init__(
+        self, library: LibraryService, player: PlayerService, parent=None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("Screen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -59,7 +59,6 @@ class PlayScreen(QWidget):
         self._view_tabs = QTabBar()
         self._view_tabs.addTab("Now playing")
         self._view_tabs.addTab("Queue")
-        self._view_tabs.addTab("Favorites")
         top.addWidget(self._view_tabs)
         top.addStretch()
         self._equalizer_button = make_tool_button("sliders", "Equalizer", size=40)
@@ -72,29 +71,45 @@ class PlayScreen(QWidget):
         self._playback_layout.setContentsMargins(0, 0, 0, 0)
         self._playback_layout.setSpacing(0)
         self._queue_panel = QueuePanel(self._library, self._player)
-        self._favorites_panel = FavoritesPanel(self._library, self._player)
         self._content_stack.addWidget(self._playback_page)
         self._content_stack.addWidget(self._queue_panel)
-        self._content_stack.addWidget(self._favorites_panel)
         root.addWidget(self._content_stack, 1)
         self._update_queue_tab()
 
+        self._player_card = QWidget()
+        self._player_card.setObjectName("PlayerCard")
+        card_layout = QHBoxLayout(self._player_card)
+        card_layout.setContentsMargins(30, 26, 34, 26)
+        card_layout.setSpacing(34)
+
         self._art = QLabel()
         self._art.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._playback_layout.addStretch(1)
-        self._playback_layout.addWidget(self._art, 0, Qt.AlignmentFlag.AlignHCenter)
-        self._playback_layout.addSpacing(28)
+        card_layout.addWidget(self._art, 0, Qt.AlignmentFlag.AlignVCenter)
 
+        details = QVBoxLayout()
+        details.setContentsMargins(0, 0, 0, 0)
+        details.setSpacing(0)
+        eyebrow = QLabel("NOW PLAYING")
+        eyebrow.setObjectName("Eyebrow")
+        details.addWidget(eyebrow)
+        details.addSpacing(10)
         self._title = ElidedLabel("Nothing playing")
-        self._title.setObjectName("TrackTitle")
-        self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._title.setObjectName("PlayerTrackTitle")
         self._artist = ElidedLabel()
-        self._artist.setObjectName("TrackArtist")
-        self._artist.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._playback_layout.addWidget(self._title)
-        self._playback_layout.addSpacing(4)
-        self._playback_layout.addWidget(self._artist)
-        self._playback_layout.addSpacing(24)
+        self._artist.setObjectName("PlayerTrackArtist")
+        details.addWidget(self._title)
+        details.addSpacing(7)
+        track_metadata = QHBoxLayout()
+        track_metadata.setSpacing(10)
+        track_metadata.addWidget(self._artist, 1)
+        self._favorite_button = make_tool_button(
+            "star", "Add to favorites", size=36, icon_size=18,
+            color=theme.value("text_dim"),
+        )
+        self._favorite_button.hide()
+        track_metadata.addWidget(self._favorite_button)
+        details.addLayout(track_metadata)
+        details.addSpacing(28)
 
         self._position_label = QLabel("0:00")
         self._position_label.setObjectName("TimeLabel")
@@ -106,21 +121,21 @@ class PlayScreen(QWidget):
         self._seek = SeekSlider()
         self._seek.setRange(0, 0)
         seek_row = QHBoxLayout()
-        seek_row.setSpacing(12)
+        seek_row.setSpacing(10)
         seek_row.addWidget(self._position_label)
         seek_row.addWidget(self._seek, 1)
         seek_row.addWidget(self._duration_label)
         seek_container = QWidget()
-        seek_container.setMaximumWidth(CONTENT_MAX_WIDTH)
+        seek_container.setObjectName("PlayerSeek")
         seek_container.setLayout(seek_row)
         seek_row.setContentsMargins(0, 0, 0, 0)
-        self._playback_layout.addWidget(seek_container, 0, Qt.AlignmentFlag.AlignHCenter)
-        self._playback_layout.addSpacing(16)
+        details.addWidget(seek_container)
+        details.addSpacing(24)
 
         self._shuffle_button = make_tool_button("shuffle", "Shuffle")
         self._previous_button = make_tool_button("skip-back", "Previous", icon_size=24)
         self._play_button = make_tool_button(
-            "play", "Play", size=64, icon_size=30, color=theme.value("accent_text")
+            "play", "Play", size=72, icon_size=32, color=theme.value("accent_text")
         )
         self._play_button.setObjectName("PlayButton")
         self._next_button = make_tool_button("skip-forward", "Next", icon_size=24)
@@ -151,14 +166,29 @@ class PlayScreen(QWidget):
         volume_action.setDefaultWidget(volume_panel)
         self._volume_menu.addAction(volume_action)
         self._volume_button.setMenu(self._volume_menu)
-        controls = QHBoxLayout()
-        controls.setSpacing(14)
-        controls.addStretch()
-        for button in (self._shuffle_button, self._previous_button, self._play_button,
-                       self._next_button, self._repeat_button, self._volume_button):
-            controls.addWidget(button)
-        controls.addStretch()
-        self._playback_layout.addLayout(controls)
+
+        transport = QHBoxLayout()
+        transport.setSpacing(18)
+        transport.addStretch()
+        transport.addWidget(self._previous_button)
+        transport.addWidget(self._play_button)
+        transport.addWidget(self._next_button)
+        transport.addStretch()
+        details.addLayout(transport)
+        details.addSpacing(10)
+
+        secondary_controls = QHBoxLayout()
+        secondary_controls.setSpacing(12)
+        secondary_controls.addStretch()
+        secondary_controls.addWidget(self._shuffle_button)
+        secondary_controls.addWidget(self._repeat_button)
+        secondary_controls.addWidget(self._volume_button)
+        secondary_controls.addStretch()
+        details.addLayout(secondary_controls)
+        details.addStretch(1)
+        card_layout.addLayout(details, 1)
+        self._playback_layout.addStretch(1)
+        self._playback_layout.addWidget(self._player_card)
         self._playback_layout.addStretch(1)
 
     def _connect_signals(self) -> None:
@@ -171,8 +201,7 @@ class PlayScreen(QWidget):
         self._shuffle_button.clicked.connect(lambda: player.set_shuffle(not player.shuffle_enabled))
         self._repeat_button.clicked.connect(lambda: player.cycle_repeat())
         self._view_tabs.currentChanged.connect(self._on_view_changed)
-        self._favorites_panel.count_changed.connect(self._update_favorites_tab)
-        self._update_favorites_tab(self._favorites_panel.favorites_count)
+        self._favorite_button.clicked.connect(self._toggle_favorite)
 
         self._seek.scrubbed.connect(lambda ms: self._position_label.setText(format_time(ms)))
         self._seek.committed.connect(player.seek)
@@ -190,6 +219,7 @@ class PlayScreen(QWidget):
         player.modes_changed.connect(self._update_mode_buttons)
         player.queue_changed.connect(self._update_queue_tab)
         self._library.cover_loaded.connect(self._on_cover_loaded)
+        self._library.library_changed.connect(self._update_favorite_button)
 
     def _sync_from_player(self) -> None:
         self._on_track_changed(self._player.current_track)
@@ -207,18 +237,14 @@ class PlayScreen(QWidget):
             count = len(self._player.queue_track_ids)
             self._view_tabs.setTabText(1, f"Queue ({count})")
 
-    def _update_favorites_tab(self, count: int) -> None:
-        self._view_tabs.setTabText(2, f"Favorites ({count})")
-
     def _on_view_changed(self, index: int) -> None:
         self._content_stack.setCurrentIndex(index)
-        if index == 2:
-            self._favorites_panel.focus_list()
 
     def refresh_theme(self) -> None:
         self._on_state_changed(self._player.state)
         self._on_mute_changed(self._player.is_muted)
         self._update_mode_buttons()
+        self._update_favorite_button()
         self._render_art()
 
     # ---- player events ----
@@ -238,7 +264,31 @@ class PlayScreen(QWidget):
         self._apply_duration(track.duration_ms if track else 0)
         self._seek.set_position(0)
         self._position_label.setText("0:00")
+        self._update_favorite_button()
         self._render_art()
+
+    def _toggle_favorite(self) -> None:
+        track = self._player.current_track
+        if track is None:
+            return
+        current = self._library.get_track(track.id)
+        if current is not None:
+            self._library.set_favorite(current.id, not current.is_favorite)
+
+    def _update_favorite_button(self) -> None:
+        track = self._player.current_track
+        current = self._library.get_track(track.id) if track is not None else None
+        is_favorite = current.is_favorite if current is not None else False
+        self._favorite_button.setIcon(
+            icons.get_icon(
+                "star-filled" if is_favorite else "star",
+                theme.value("accent") if is_favorite else theme.value("text_dim"),
+            )
+        )
+        self._favorite_button.setToolTip(
+            "Remove from favorites" if is_favorite else "Add to favorites"
+        )
+        self._favorite_button.setVisible(current is not None)
 
     def _on_state_changed(self, state: PlaybackState) -> None:
         playing = state is PlaybackState.PLAYING
@@ -307,7 +357,8 @@ class PlayScreen(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        size = max(160, min(self.width() - 96, self.height() - 400, 440))
+        size = max(160, min(self.width() * 0.34, self.height() - 260, 360))
+        size = int(size)
         if size != self._art_size:
             self._art_size = size
             self._render_art()

@@ -54,6 +54,11 @@ class VideoLibraryTests(unittest.TestCase):
         self.assertEqual(len(videos), 1)
         self.assertEqual(videos[0].title, "sample")
 
+        self.service.set_favorite(videos[0].id, True)
+        self.assertTrue(self.service.videos()[0].is_favorite)
+        self.service.set_favorite(videos[0].id, False)
+        self.assertFalse(self.service.videos()[0].is_favorite)
+
         self.service.remove_many([videos[0].id])
         self.assertEqual(self.service.videos(), [])
 

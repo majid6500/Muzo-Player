@@ -35,6 +35,7 @@ class Video:
     id: int
     path: str
     title: str
+    is_favorite: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,3 +44,11 @@ class NewVideo:
 
     path: str
     title: str
+
+
+@dataclass(frozen=True, slots=True)
+class Playlist:
+    """A named, user-managed collection of tracks."""
+
+    id: int
+    name: str

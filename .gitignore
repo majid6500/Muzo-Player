@@ -14,9 +14,6 @@ build/
 dist/
 *.egg-info/
 
-# PyInstaller
-*.spec
-
 # OS files
 .DS_Store
 Thumbs.db

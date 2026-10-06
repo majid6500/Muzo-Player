@@ -7,7 +7,10 @@ from typing import Sequence
 from PySide6.QtCore import (
     QAbstractListModel, QModelIndex, QRect, QRectF, QSize, Qt, QTimer, Signal,
 )
-from PySide6.QtGui import QFont, QGuiApplication, QPainter, QPainterPath
+from PySide6.QtGui import (
+    QBrush, QFont, QGuiApplication, QLinearGradient, QPainter, QPainterPath,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView, QListView, QMenu, QStyle, QStyledItemDelegate,
 )
@@ -23,13 +26,18 @@ FavoriteRole = Qt.ItemDataRole.UserRole + 4
 IsPlayingRole = Qt.ItemDataRole.UserRole + 5
 AnimationPhaseRole = Qt.ItemDataRole.UserRole + 6
 VideoRole = Qt.ItemDataRole.UserRole + 7
+CoverRole = Qt.ItemDataRole.UserRole + 8
 
 
 class TrackListModel(QAbstractListModel):
+    cover_requested = Signal(int)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._tracks: list[Track] = []
         self._row_by_id: dict[int, int] = {}
+        self._covers: dict[int, QPixmap] = {}
+        self._requested_covers: set[int] = set()
         self._current_id: int | None = None
         self._is_playing = False
         self._animation_phase = 0
@@ -46,6 +54,11 @@ class TrackListModel(QAbstractListModel):
             return track.title
         if role == TrackRole:
             return track
+        if role == CoverRole:
+            if track.id not in self._requested_covers:
+                self._requested_covers.add(track.id)
+                self.cover_requested.emit(track.id)
+            return self._covers.get(track.id)
         if role == IsCurrentRole:
             return track.id == self._current_id
         if role == UnavailableRole:
@@ -66,8 +79,22 @@ class TrackListModel(QAbstractListModel):
         self.beginResetModel()
         self._tracks = list(tracks)
         self._row_by_id = {track.id: row for row, track in enumerate(self._tracks)}
+        track_ids = set(self._row_by_id)
+        self._covers = {
+            track_id: cover
+            for track_id, cover in self._covers.items()
+            if track_id in track_ids
+        }
+        self._requested_covers.intersection_update(track_ids)
         self._unavailable = {}
         self.endResetModel()
+
+    def set_cover(self, track_id: int, cover: QPixmap) -> None:
+        if track_id not in self._row_by_id:
+            return
+        self._covers[track_id] = cover
+        index = self.index(self._row_by_id[track_id])
+        self.dataChanged.emit(index, index, [CoverRole])
 
     def set_current_id(self, track_id: int | None) -> None:
         previous, self._current_id = self._current_id, track_id
@@ -111,7 +138,10 @@ class VideoTrackListModel(TrackListModel):
     def set_videos(self, videos: Sequence[Video]) -> None:
         self._video_ids = {video.id for video in videos}
         self.set_tracks([
-            Track(video.id, video.path, video.title, "Video", "", 0)
+            Track(
+                video.id, video.path, video.title, "Video", "", 0,
+                is_favorite=video.is_favorite,
+            )
             for video in videos
         ])
 
@@ -124,7 +154,7 @@ class VideoTrackListModel(TrackListModel):
 
 
 class TrackDelegate(QStyledItemDelegate):
-    ROW_HEIGHT = 60
+    ROW_HEIGHT = 72
 
     def sizeHint(self, option, index) -> QSize:
         return QSize(option.rect.width(), self.ROW_HEIGHT)
@@ -147,30 +177,26 @@ class TrackDelegate(QStyledItemDelegate):
         row = QRectF(option.rect).adjusted(4, 2, -4, -2)
         self._paint_background(painter, option, row, is_current)
 
-        # Leading icon
-        icon_size = 22
-        icon_rect = QRect(int(row.left()) + 16, int(row.center().y()) - icon_size // 2,
-                          icon_size, icon_size)
-        if is_playing:
-            self._paint_equalizer(painter, icon_rect, animation_phase)
-        elif unavailable:
-            icon_name, icon_color = "alert", theme.value("danger")
-            painter.drawPixmap(icon_rect, icons.pixmap(icon_name, 64, icon_color))
-        elif is_video:
-            icon_color = theme.value("accent_hover") if is_current else theme.value("text_dim")
-            painter.drawPixmap(icon_rect, icons.pixmap("film", 64, icon_color))
-        elif is_current:
-            icon_name, icon_color = "volume", theme.value("accent_hover")
-            painter.drawPixmap(icon_rect, icons.pixmap(icon_name, 64, icon_color))
-        else:
-            icon_name, icon_color = "music", theme.value("text_dim")
-            painter.drawPixmap(icon_rect, icons.pixmap(icon_name, 64, icon_color))
+        thumbnail_size = 44
+        thumbnail_rect = QRect(
+            int(row.left()) + 12,
+            int(row.center().y()) - thumbnail_size // 2,
+            thumbnail_size,
+            thumbnail_size,
+        )
+        self._paint_thumbnail(
+            painter,
+            thumbnail_rect,
+            index.data(CoverRole),
+            is_video,
+            unavailable,
+        )
 
         # Text
-        left = icon_rect.right() + 16
-        right = int(row.right()) - 16
+        left = thumbnail_rect.right() + 14
         favorite_rect = self.favorite_rect(option.rect)
-        duration_width = 64
+        has_active_indicator = is_playing and not is_video
+        duration_width = 104 if has_active_indicator else 64
         duration_right = favorite_rect.left() - 10
         duration_rect = QRect(duration_right - duration_width, int(row.top()), duration_width,
                       int(row.height()))
@@ -183,8 +209,8 @@ class TrackDelegate(QStyledItemDelegate):
         sub_font = QFont(option.font)
         sub_font.setPixelSize(12)
 
-        title_rect = QRect(left, top + 9, text_width, 20)
-        sub_rect = QRect(left, top + 29, text_width, 18)
+        title_rect = QRect(left, top + 14, text_width, 20)
+        sub_rect = QRect(left, top + 36, text_width, 18)
         align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
         painter.setFont(title_font)
@@ -198,7 +224,9 @@ class TrackDelegate(QStyledItemDelegate):
             subtitle = unavailable
         else:
             painter.setPen(theme.color("text_dim"))
-            subtitle = track.artist or "Unknown artist"
+            subtitle = " \u00b7 ".join(
+                filter(None, [track.artist or "Unknown artist", track.album])
+            )
         painter.drawText(sub_rect, align, painter.fontMetrics().elidedText(
             subtitle, Qt.TextElideMode.ElideRight, text_width))
 
@@ -206,22 +234,95 @@ class TrackDelegate(QStyledItemDelegate):
         if track.duration_ms:
             painter.setFont(sub_font)
             painter.setPen(theme.color("text_dim"))
+            time_rect = (
+                self.duration_text_rect(duration_rect)
+                if has_active_indicator else duration_rect
+            )
+            if has_active_indicator:
+                indicator_rect = self.active_indicator_rect(time_rect)
+                self._paint_equalizer(painter, indicator_rect, animation_phase)
             painter.drawText(
-                duration_rect,
+                time_rect,
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 format_time(track.duration_ms),
             )
 
-        if not is_video:
-            painter.drawPixmap(
-                favorite_rect,
-                icons.pixmap(
-                    "star-filled" if is_favorite else "star",
-                    64,
-                    theme.value("accent") if is_favorite else theme.value("text_dim"),
-                ),
-            )
+        painter.drawPixmap(
+            favorite_rect,
+            icons.pixmap(
+                "star-filled" if is_favorite else "star",
+                64,
+                theme.value("accent") if is_favorite else theme.value("text_dim"),
+            ),
+        )
         painter.restore()
+
+    @staticmethod
+    def _paint_thumbnail(
+        painter: QPainter,
+        rect: QRect,
+        cover: QPixmap | None,
+        is_video: bool,
+        unavailable: str,
+    ) -> None:
+        painter.save()
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(rect), 7, 7)
+        painter.setClipPath(clip)
+
+        if cover is not None and not cover.isNull():
+            scaled = cover.scaled(
+                rect.size(),
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            source = QRect(
+                (scaled.width() - rect.width()) // 2,
+                (scaled.height() - rect.height()) // 2,
+                rect.width(),
+                rect.height(),
+            )
+            painter.drawPixmap(rect, scaled, source)
+        else:
+            gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
+            gradient.setColorAt(0.0, theme.color("surface_alt"))
+            gradient.setColorAt(1.0, theme.color("accent_soft"))
+            painter.fillRect(rect, QBrush(gradient))
+            icon = "film" if is_video else "music"
+            color = theme.value("danger") if unavailable else theme.value("text_dim")
+            icon_size = 24
+            painter.drawPixmap(
+                QRect(
+                    rect.center().x() - icon_size // 2,
+                    rect.center().y() - icon_size // 2,
+                    icon_size,
+                    icon_size,
+                ),
+                icons.pixmap(icon, 64, color),
+            )
+
+        painter.restore()
+
+    @staticmethod
+    def duration_text_rect(duration_rect: QRect) -> QRect:
+        width = 64
+        return QRect(
+            duration_rect.right() - width + 1,
+            duration_rect.top(),
+            width,
+            duration_rect.height(),
+        )
+
+    @staticmethod
+    def active_indicator_rect(time_rect: QRect) -> QRect:
+        width = 16
+        height = 22
+        return QRect(
+            time_rect.left() - 22,
+            time_rect.center().y() - (height - 1) // 2,
+            width,
+            height,
+        )
 
     @staticmethod
     def _paint_equalizer(painter: QPainter, rect: QRect, phase: int) -> None:
@@ -231,6 +332,7 @@ class TrackDelegate(QStyledItemDelegate):
         total_width = bar_width * len(heights) + gap * (len(heights) - 1)
         left = rect.center().x() - total_width // 2
         baseline = rect.bottom() - 2
+        painter.save()
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(theme.color("accent_hover"))
         for index, height in enumerate(heights):
@@ -240,6 +342,7 @@ class TrackDelegate(QStyledItemDelegate):
                 1,
                 1,
             )
+        painter.restore()
 
     @staticmethod
     def favorite_rect(rect: QRect) -> QRect:
@@ -321,7 +424,7 @@ class TrackListView(QListView):
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             index = self.indexAt(event.position().toPoint())
-            if index.isValid() and not index.data(VideoRole) and TrackDelegate.favorite_rect(self.visualRect(index)).contains(
+            if index.isValid() and TrackDelegate.favorite_rect(self.visualRect(index)).contains(
                 event.position().toPoint()
             ):
                 self._favorite_pressed = index
@@ -352,10 +455,17 @@ class TrackListView(QListView):
         menu = QMenu(self)
         if index.data(VideoRole):
             open_action = menu.addAction("Open video")
+            track: Track | None = index.data(TrackRole)
+            favorite_action = menu.addAction(
+                "Remove from favorites" if track and track.is_favorite
+                else "Add to favorites"
+            )
             remove_action = menu.addAction("Remove from library")
             chosen = menu.exec(event.globalPos())
             if chosen is open_action:
                 self._emit_activated(index)
+            elif chosen is favorite_action and track is not None:
+                self.favorite_toggled.emit(track.id, not track.is_favorite)
             elif chosen is remove_action:
                 self.remove_requested.emit()
             return

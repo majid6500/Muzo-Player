@@ -2,10 +2,27 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 APP_NAME = "Muzo Player"
+APP_VERSION = "1.0.0"
 DATA_FOLDER_NAME = "MusicPlayer"
+
+
+def resource_path(name: str) -> Path:
+    """Resolve a bundled application resource in source and frozen builds."""
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return bundle_root / name
+
+
+def app_icon_path() -> Path:
+    return resource_path("Muzo Player.ico")
+
+
+def app_logo_path() -> Path:
+    return resource_path("app/assets/logo.png")
+
 
 # To support another format, add its extension here. mutagen reads the tags
 # and QtMultimedia (FFmpeg backend) plays it, e.g. ".flac", ".m4a".

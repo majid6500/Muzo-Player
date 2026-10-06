@@ -8,7 +8,12 @@ from app.models import NewVideo, Video
 
 
 def _to_video(row: sqlite3.Row) -> Video:
-    return Video(id=row["id"], path=row["path"], title=row["title"])
+    return Video(
+        id=row["id"],
+        path=row["path"],
+        title=row["title"],
+        is_favorite=bool(row["is_favorite"]),
+    )
 
 
 class VideoRepository:
@@ -17,7 +22,7 @@ class VideoRepository:
 
     def list_all(self) -> list[Video]:
         rows = self._conn.execute(
-            "SELECT id, path, title FROM videos "
+            "SELECT id, path, title, is_favorite FROM videos "
             "ORDER BY title COLLATE NOCASE, id"
         ).fetchall()
         return [_to_video(row) for row in rows]
@@ -35,4 +40,11 @@ class VideoRepository:
         with self._conn:
             self._conn.executemany(
                 "DELETE FROM videos WHERE id = ?", [(video_id,) for video_id in video_ids]
+            )
+
+    def set_favorites(self, video_ids: Sequence[int], is_favorite: bool) -> None:
+        with self._conn:
+            self._conn.executemany(
+                "UPDATE videos SET is_favorite = ? WHERE id = ?",
+                [(int(is_favorite), video_id) for video_id in video_ids],
             )

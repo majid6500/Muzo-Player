@@ -74,6 +74,19 @@ class VideoLibraryService(QObject):
             return
         self.refresh()
 
+    def set_favorite(self, video_id: int, is_favorite: bool) -> None:
+        self.set_favorites([video_id], is_favorite)
+
+    def set_favorites(self, video_ids: Sequence[int], is_favorite: bool) -> None:
+        if not video_ids:
+            return
+        try:
+            self._repository.set_favorites(video_ids, is_favorite)
+        except sqlite3.Error as exc:
+            self.error_occurred.emit(f"Could not update video favorite: {exc}")
+            return
+        self.refresh()
+
     def shutdown(self) -> None:
         if self._worker is not None:
             self._worker.requestInterruption()

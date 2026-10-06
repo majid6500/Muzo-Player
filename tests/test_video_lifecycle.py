@@ -3,27 +3,36 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import (
-    QObject, QEventLoop, QItemSelectionModel, QPoint, Qt, Signal, QTimer,
+    QObject, QEventLoop, QItemSelectionModel, QPoint, QRect, Qt, Signal, QTimer,
 )
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
 from app.core.audio_backend import PlaybackState
 from app.core.playback_queue import PlaybackQueue
 from app.core.player_service import PlayerService
 from app.core.video_library_service import VideoLibraryService
+from app.config import APP_VERSION, app_icon_path, app_logo_path
 from app.data.database import Database
+from app.data.playlist_repository import PlaylistRepository
 from app.data.video_repository import VideoRepository
-from app.models import Track
+from app.core.playlist_service import PlaylistService
+from app.models import NewVideo, Track
 from app.ui.main_window import MainWindow
+from app.ui.theme.window_chrome import colorref
 from tests.test_playback import FakeAudioBackend, FakeSettings
-from app.ui.widgets.track_list import IsCurrentRole, IsPlayingRole, TrackDelegate, VideoRole
+from app.ui.widgets.track_list import (
+    FavoriteRole, IsCurrentRole, IsPlayingRole, TrackDelegate, VideoRole,
+)
+from app.ui.widgets.video_overlay import VideoOverlay
 
 
 class FakeLibrary(QObject):
@@ -46,6 +55,14 @@ class FakeLibrary(QObject):
 
     def get_cover(self, _track_id: int) -> None:
         return None
+
+    def set_favorite(self, track_id: int, is_favorite: bool) -> None:
+        self._tracks = [
+            replace(track, is_favorite=is_favorite)
+            if track.id == track_id else track
+            for track in self._tracks
+        ]
+        self.library_changed.emit()
 
     def add_folder(self, _folder: str) -> None:
         pass
@@ -124,6 +141,7 @@ class VideoLifecycleTests(unittest.TestCase):
         self.library = FakeLibrary([track])
         self.database = Database(Path(self.temp_dir.name) / "library.db")
         self.video_library = VideoLibraryService(VideoRepository(self.database))
+        self.playlists = PlaylistService(PlaylistRepository(self.database))
         self.audio_backend = FakeAudioBackend()
         self.player = PlayerService(
             self.audio_backend, self.library, PlaybackQueue(), FakeSettings()
@@ -133,7 +151,8 @@ class VideoLifecycleTests(unittest.TestCase):
 
     def _open_video(self) -> MainWindow:
         window = MainWindow(
-            self.library, self.video_library, self.player, FakeSettings()
+            self.library, self.video_library, self.player, FakeSettings(),
+            self.playlists,
         )
         self.addCleanup(window.shutdown)
         with (
@@ -154,15 +173,170 @@ class VideoLifecycleTests(unittest.TestCase):
         loop.exec()
         self.video_library.import_finished.disconnect(loop.quit)
 
+    def test_now_playing_bar_and_playback_screen_follow_player_state(self) -> None:
+        self.player.play_track(1)
+        window = MainWindow(
+            self.library, self.video_library, self.player, FakeSettings(),
+            self.playlists,
+        )
+        self.addCleanup(window.shutdown)
+
+        mini_player = window._screens["home"]._mini_player
+        self.assertFalse(mini_player.isHidden())
+        self.assertEqual(mini_player._title._full_text, "Music")
+        self.assertEqual(mini_player._artist._full_text, "Artist \u00b7 Album")
+        self.player.position_changed.emit(650)
+        self.assertEqual(mini_player._progress.value(), 650)
+
+        window.navigate("play")
+        play_screen = window._screens["play"]
+        self.assertEqual(play_screen._player_card.objectName(), "PlayerCard")
+        self.assertEqual(play_screen._play_button.width(), 72)
+        self.assertFalse(window.windowIcon().isNull())
+        self.assertTrue(app_icon_path().is_file())
+        self.assertTrue(app_logo_path().is_file())
+        self.assertEqual(APP_VERSION, "1.0.0")
+        self.assertFalse(window._screens["home"]._brand_icon.pixmap().isNull())
+        self.assertFalse(play_screen._favorite_button.isHidden())
+        self.assertEqual(play_screen._favorite_button.toolTip(), "Add to favorites")
+        play_screen._favorite_button.click()
+        self.assertTrue(self.library.get_track(1).is_favorite)
+        self.assertEqual(play_screen._favorite_button.toolTip(), "Remove from favorites")
+        play_screen._favorite_button.click()
+        self.assertFalse(self.library.get_track(1).is_favorite)
+
+    def test_video_favorites_use_the_shared_star_and_favorites_section(self) -> None:
+        repository = VideoRepository(self.database)
+        repository.add_many([NewVideo(self.video_path, "movie")])
+        self.video_library.refresh()
+        window = MainWindow(
+            self.library, self.video_library, self.player, FakeSettings(),
+            self.playlists,
+        )
+        self.addCleanup(window.shutdown)
+        home = window._screens["home"]
+        home._filter_tabs.setCurrentIndex(1)
+        self.assertTrue(home._favorites_header.isHidden())
+        video_index = home._video_model.index(0)
+        self.assertFalse(video_index.data(FavoriteRole))
+        home._video_list.favorite_toggled.emit(1, True)
+        self.assertTrue(self.video_library.videos()[0].is_favorite)
+        self.assertTrue(home._video_model.index(0).data(FavoriteRole))
+
+        home._filter_tabs.setCurrentIndex(2)
+        self.assertFalse(home._favorites_header.isHidden())
+        home._favorite_tabs.setCurrentIndex(1)
+        self.assertIs(home._stack.currentWidget(), home._media_page)
+        self.assertIs(home._media_stack.currentWidget(), home._video_list)
+        self.assertFalse(home._favorite_tabs.isHidden())
+        self.assertEqual(home._video_model.rowCount(), 1)
+        self.assertTrue(home._video_model.index(0).data(FavoriteRole))
+        home._video_list.favorite_toggled.emit(1, False)
+        self.assertEqual(home._video_model.rowCount(), 0)
+        self.assertFalse(self.video_library.videos()[0].is_favorite)
+
+    def test_playing_indicator_is_positioned_beside_track_duration(self) -> None:
+        duration_rect = QRect(400, 0, 104, TrackDelegate.ROW_HEIGHT)
+
+        time_rect = TrackDelegate.duration_text_rect(duration_rect)
+        indicator = TrackDelegate.active_indicator_rect(time_rect)
+
+        self.assertEqual(time_rect.width(), 64)
+        self.assertEqual(indicator.center().y(), time_rect.center().y())
+        self.assertLess(indicator.right(), time_rect.left())
+
+    def test_equalizer_painting_preserves_duration_text_color(self) -> None:
+        image = QImage(160, 80, QImage.Format.Format_ARGB32)
+        painter = QPainter(image)
+        expected_color = QColor("#9ba9a1")
+        painter.setPen(expected_color)
+
+        TrackDelegate._paint_equalizer(painter, QRect(20, 20, 16, 22), 0)
+
+        self.assertEqual(painter.pen().color(), expected_color)
+        painter.end()
+
+    def test_windows_titlebar_color_uses_theme_colorref_order(self) -> None:
+        self.assertEqual(colorref("#123456"), 0x563412)
+
+    def test_immersive_video_controls_are_grouped_and_styled(self) -> None:
+        overlay = VideoOverlay(None)
+        self.addCleanup(overlay.close)
+
+        groups = overlay.findChildren(QWidget)
+        object_names = {widget.objectName() for widget in groups}
+        self.assertIn("OverlayControlGroup", object_names)
+        self.assertIn("OverlayTimelineGroup", object_names)
+        self.assertEqual(overlay._seek.objectName(), "SeekSlider")
+        self.assertEqual(overlay._volume.objectName(), "VolumeSlider")
+        self.assertEqual(overlay._play.objectName(), "OverlayPlayButton")
+
+    def test_home_selection_exposes_add_to_playlist_and_library_playlist_tab(self) -> None:
+        window = MainWindow(
+            self.library, self.video_library, self.player, FakeSettings(),
+            self.playlists,
+        )
+        self.addCleanup(window.shutdown)
+        home = window._screens["home"]
+        home._model.set_tracks(self.library.tracks())
+        home._list.selectionModel().select(
+            home._model.index(0, 0),
+            home._list.selectionModel().SelectionFlag.Select
+            | home._list.selectionModel().SelectionFlag.Rows,
+        )
+
+        self.assertFalse(home._playlist_button.isHidden())
+        play_screen = window._screens["play"]
+        self.assertEqual(
+            [home._filter_tabs.tabText(index) for index in range(4)],
+            ["All songs", "All videos", "Favorites", "Playlists"],
+        )
+        self.assertEqual(
+            [play_screen._view_tabs.tabText(index) for index in range(2)],
+            ["Now playing", "Queue (1)"],
+        )
+        home._filter_tabs.setCurrentIndex(3)
+        self.assertTrue(home._favorites_header.isHidden())
+        self.assertIs(home._stack.currentWidget(), home._playlist_panel)
+        self.assertTrue(home._remove_button.isHidden())
+        self.assertTrue(home._playlist_button.isHidden())
+
+    def test_playlist_delete_confirmation_deletes_selected_playlist(self) -> None:
+        playlist = self.playlists.create("Delete me")
+        self.assertIsNotNone(playlist)
+        window = MainWindow(
+            self.library, self.video_library, self.player, FakeSettings(),
+            self.playlists,
+        )
+        self.addCleanup(window.shutdown)
+        home = window._screens["home"]
+        home._filter_tabs.setCurrentIndex(3)
+
+        with patch(
+            "app.ui.widgets.playlist_panel.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            home._playlist_panel._delete_button.click()
+
+        self.assertEqual(self.playlists.playlists(), [])
+        self.assertFalse(home._playlist_panel._delete_button.isEnabled())
+
     def test_home_screen_routes_video_add_open_and_remove_actions(self) -> None:
         window = MainWindow(
-            self.library, self.video_library, self.player, FakeSettings()
+            self.library, self.video_library, self.player, FakeSettings(),
+            self.playlists,
         )
         self.addCleanup(window.shutdown)
         home = window._screens["home"]
         self.assertEqual(
-            [home._filter_tabs.tabText(index) for index in range(3)],
-            ["All songs", "All videos", "Favorites"],
+            [action.text() for action in home._add_button.menu().actions()],
+            ["Add audio or video files...", "Add media folder..."],
+        )
+        self.assertTrue(home._remove_button.isHidden())
+        self.assertTrue(home._video_button.isHidden())
+        self.assertEqual(
+            [home._filter_tabs.tabText(index) for index in range(4)],
+            ["All songs", "All videos", "Favorites", "Playlists"],
         )
         self.assertEqual(window.width(), 1180)
         self.assertEqual(window.minimumWidth(), 980)
@@ -176,6 +350,7 @@ class VideoLifecycleTests(unittest.TestCase):
 
         self.assertEqual(len(self.video_library.videos()), 1)
         home._filter_tabs.setCurrentIndex(1)
+        self.assertFalse(home._video_button.isHidden())
         video_list = home._video_list
         self.assertIsInstance(video_list.itemDelegate(), TrackDelegate)
         self.assertEqual(home._video_model.rowCount(), 1)
@@ -189,6 +364,7 @@ class VideoLifecycleTests(unittest.TestCase):
         )
         video_list.setCurrentIndex(index)
         self.assertTrue(home._remove_button.isEnabled())
+        self.assertFalse(home._remove_button.isHidden())
         opened_paths: list[str] = []
         home.open_video_path_requested.connect(opened_paths.append)
         home._video_button.click()

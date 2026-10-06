@@ -125,6 +125,9 @@ class PlayerService(QObject):
     # ---- commands ----
     def play_track(self, track_id: int) -> bool:
         """Start a track chosen by the user. Returns False if it cannot start."""
+        if track_id not in self._queue.track_ids:
+            self._queue.replace_tracks([track.id for track in self._library.tracks()])
+            self.queue_changed.emit()
         current = self._current
         if current and current.id == track_id and self._failed_track_id != track_id:
             self._want_playing = True
@@ -134,6 +137,19 @@ class PlayerService(QObject):
             return True
         self._consecutive_failures = 0
         return self._start(track_id)
+
+    def play_tracks(self, track_ids: Sequence[int]) -> bool:
+        """Replace the queue with a collection and start its first available track."""
+        available = {track.id for track in self._library.tracks()}
+        tracks = list(dict.fromkeys(i for i in track_ids if i in available))
+        if not tracks:
+            self.error_occurred.emit("This playlist has no playable songs.")
+            return False
+        self._queue.replace_tracks(tracks)
+        self._queue.set_current(self._queue.track_ids[0])
+        self.queue_changed.emit()
+        self._consecutive_failures = 0
+        return self._start(self._queue.track_ids[0], sync_queue=False)
 
     def toggle_play_pause(self) -> None:
         if self.state is PlaybackState.PLAYING:

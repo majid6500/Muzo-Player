@@ -18,9 +18,10 @@ def make_tool_button(
     button.setIcon(icons.get_icon(icon_name, color))
     button.setIconSize(QSize(icon_size, icon_size))
     button.setToolTip(tooltip)
+    button.setAccessibleName(tooltip)
     button.setFixedSize(size, size)
     button.setCursor(Qt.CursorShape.PointingHandCursor)
-    button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
     return button
 
 
@@ -31,7 +32,8 @@ def make_push_button(
     button.setIcon(icons.get_icon(icon_name, theme.value("accent_text") if primary else None))
     button.setIconSize(QSize(18, 18))
     button.setCursor(Qt.CursorShape.PointingHandCursor)
-    button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    button.setAccessibleName(text)
+    button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
     if primary:
         button.setProperty("variant", "primary")
     return button

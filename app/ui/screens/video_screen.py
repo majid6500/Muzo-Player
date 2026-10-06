@@ -99,6 +99,7 @@ class VideoScreen(QWidget):
         self._immersive_button.setEnabled(False)
         self._subtitle_button.setEnabled(False)
         self._volume = QSlider(Qt.Orientation.Horizontal)
+        self._volume.setObjectName("VolumeSlider")
         self._volume.setRange(0, 100)
         self._volume.setValue(70)
         self._volume.setFixedWidth(150)
@@ -278,7 +279,7 @@ class VideoScreen(QWidget):
 
     def _position_overlay(self) -> None:
         window = self.window()
-        width = min(880, max(560, window.width() - 40))
+        width = min(1040, max(680, window.width() - 64))
         height = self._overlay.height()
         self._overlay.setFixedWidth(width)
         origin = window.mapToGlobal(QPoint(0, 0))

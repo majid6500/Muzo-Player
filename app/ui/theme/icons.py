@@ -36,6 +36,8 @@ _ICONS: dict[str, str] = {
     "volume-muted": '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>'
                      '<line x1="3" y1="3" x2="21" y2="21"/>',
     "arrow-left": '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
+    "home": '<path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9"/>'
+            '<path d="M9 20v-6h6v6"/>',
     "folder-plus": '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'
                    '<line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/>',
     "file-plus": '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'

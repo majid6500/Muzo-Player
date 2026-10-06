@@ -33,6 +33,23 @@ MIGRATIONS: list[str] = [
         added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    """
+    CREATE TABLE playlists (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE playlist_tracks (
+        playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+        track_id    INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+        position    INTEGER NOT NULL,
+        PRIMARY KEY (playlist_id, track_id),
+        UNIQUE (playlist_id, position)
+    );
+    """,
+    """
+    ALTER TABLE videos ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 

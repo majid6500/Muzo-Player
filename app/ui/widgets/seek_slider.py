@@ -18,6 +18,7 @@ class SeekSlider(QSlider):
 
     def __init__(self, parent=None) -> None:
         super().__init__(Qt.Orientation.Horizontal, parent)
+        self.setObjectName("SeekSlider")
         self._dragging = False
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)

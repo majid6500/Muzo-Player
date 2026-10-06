@@ -2,22 +2,34 @@
     font-family: "Segoe UI", "Segoe UI Variable", sans-serif;
     font-size: 14px;
     color: $text;
-    outline: none;
 }
 
 QMainWindow, QStackedWidget, QWidget#Screen { background: $bg; }
 QWidget#VideoSurface { background: #000000; }
 QWidget#VideoOverlay {
-    background: rgba(16, 19, 17, 225); border: 1px solid $border; border-radius: 10px;
+    background: $surface; border: 1px solid $border; border-radius: 18px;
 }
+QWidget#OverlayControlGroup, QWidget#OverlayTimelineGroup { background: transparent; }
+QFrame#OverlaySeparator { color: $border; background: $border; max-width: 1px; }
 QDialog { background: $bg; }
 QLabel { background: transparent; }
 QLabel#ScreenTitle { font-size: 28px; font-weight: 700; }
+QLabel#FavoritesSectionTitle { font-size: 18px; font-weight: 600; }
+QLabel#BrandIcon {
+    background: $surface;
+    border: 1px solid $border;
+    border-radius: 10px;
+    padding: 7px;
+}
+QLabel#HomeIcon { padding: 4px; }
 QLabel#Subtle { color: $text_dim; }
 QLabel#TrackTitle { font-size: 26px; font-weight: 700; }
 QLabel#TrackArtist { font-size: 16px; color: $text_dim; }
 QLabel#TimeLabel { font-size: 12px; color: $text_dim; }
 QLabel#EmptyTitle { font-size: 20px; font-weight: 600; }
+QLabel#Eyebrow { color: $accent_hover; font-size: 11px; font-weight: 700; letter-spacing: 1px; }
+QLabel#PlayerTrackTitle { font-size: 30px; font-weight: 700; }
+QLabel#PlayerTrackArtist { color: $text_dim; font-size: 16px; }
 
 QPushButton {
     background: $surface_alt;
@@ -29,15 +41,18 @@ QPushButton {
 QPushButton:hover { background: $hover; }
 QPushButton:pressed { background: $surface; }
 QPushButton:disabled { color: $text_dim; background: $surface; border-color: $surface; }
+QPushButton:focus { border: 1px solid $accent_hover; }
 QPushButton[variant="primary"] { background: $accent; border: none; color: $accent_text; }
 QPushButton[variant="primary"]:hover { background: $accent_hover; }
 QPushButton[variant="primary"]:pressed { background: $accent_pressed; }
 QPushButton[variant="primary"]:disabled { background: $accent_disabled; color: $text_dim; }
+QPushButton[variant="primary"]:focus { border: 1px solid $accent_text; }
 
 QToolButton { background: transparent; border: none; border-radius: 22px; }
 QToolButton:hover { background: $hover; }
 QToolButton:pressed { background: $surface_alt; }
 QToolButton:disabled { background: transparent; }
+QToolButton:focus { border: 1px solid $accent_hover; }
 QToolButton#PlayButton { background: $accent; color: $accent_text; border-radius: 32px; }
 QToolButton#PlayButton:hover { background: $accent_hover; }
 QToolButton#PlayButton:pressed { background: $accent_pressed; }
@@ -45,11 +60,28 @@ QToolButton#PlayButton:disabled { background: $accent_disabled; }
 QToolButton#MiniPlayButton { background: $accent; color: $accent_text; border-radius: 20px; }
 QToolButton#MiniPlayButton:hover { background: $accent_hover; }
 QToolButton#MiniPlayButton:pressed { background: $accent_pressed; }
+QToolButton#OverlayPlayButton {
+    background: $accent; color: $accent_text; border-radius: 24px;
+}
+QToolButton#OverlayPlayButton:hover { background: $accent_hover; }
+QToolButton#OverlayPlayButton:pressed { background: $accent_pressed; }
 
 QFrame#MiniPlayer {
-    background: $accent_soft;
-    border: 1px solid $accent_disabled;
+    background: $surface;
+    border: 1px solid $border;
     border-radius: 14px;
+}
+QFrame#MiniPlayer:hover { background: $surface_alt; border-color: $accent_disabled; }
+QLabel#MiniCover { background: $accent_soft; border-radius: 8px; }
+QProgressBar#MiniProgress {
+    background: $border; border: none; border-radius: 2px;
+    min-height: 3px; max-height: 3px;
+}
+QProgressBar#MiniProgress::chunk { background: $accent; border-radius: 2px; }
+QWidget#PlayerCard {
+    background: $surface;
+    border: 1px solid $border;
+    border-radius: 22px;
 }
 
 QListView { background: transparent; border: none; }
@@ -61,27 +93,51 @@ QListWidget#FavoriteList { background: transparent; border: none; }
 QListWidget#FavoriteList::item { padding: 12px 10px; border-radius: 6px; }
 QListWidget#FavoriteList::item:hover { background: $hover; }
 QListWidget#FavoriteList::item:selected { background: $selection; color: $text; }
+QListWidget#PlaylistList, QListWidget#PlaylistTracks {
+    background: transparent; border: none;
+}
+QListWidget#PlaylistList::item, QListWidget#PlaylistTracks::item {
+    padding: 12px 10px; border-radius: 7px;
+}
+QListWidget#PlaylistList::item:hover, QListWidget#PlaylistTracks::item:hover {
+    background: $hover;
+}
+QListWidget#PlaylistList::item:selected, QListWidget#PlaylistTracks::item:selected {
+    background: $selection; color: $text;
+}
 QTabBar::tab {
     background: transparent; color: $text_dim; border: 1px solid transparent;
     border-radius: 6px; padding: 8px 14px;
 }
-QTabBar::tab:selected { background: $selection; color: $accent; border-color: $border; }
+QTabBar::tab:selected {
+    background: $selection; color: $accent; border-color: transparent;
+}
 QTabBar::tab:!selected:hover { background: $hover; color: $text; }
+QTabBar::tab:focus { border-color: $accent_hover; }
+QTabBar#FavoriteTypeTabs::tab { padding: 6px 12px; }
 
-QSlider::groove:horizontal { height: 6px; background: $border; border-radius: 3px; }
+QSlider::groove:horizontal { height: 5px; background: $border; border-radius: 3px; }
 QSlider::sub-page:horizontal { background: $accent; border-radius: 3px; }
 QSlider::handle:horizontal {
-    background: #ffffff; width: 14px; height: 14px; margin: -4px 0; border-radius: 7px;
+    background: $text; border: 2px solid $surface; width: 12px; height: 12px;
+    margin: -5px 0; border-radius: 7px;
 }
 QSlider::handle:horizontal:hover { background: $accent_hover; }
 QSlider:disabled::sub-page:horizontal { background: $border; }
-QSlider::groove:vertical { width: 6px; background: $border; border-radius: 3px; }
+QSlider#SeekSlider::groove:horizontal { height: 4px; }
+QSlider#SeekSlider::handle:horizontal { width: 10px; height: 10px; margin: -4px 0; }
+QSlider#VolumeSlider::groove:horizontal { height: 4px; }
+QSlider#VolumeSlider::handle:horizontal { width: 11px; height: 11px; margin: -4px 0; }
+QSlider::groove:vertical { width: 5px; background: $border; border-radius: 3px; }
 QSlider::sub-page:vertical { background: $border; border-radius: 3px; }
 QSlider::add-page:vertical { background: $accent; border-radius: 3px; }
 QSlider::handle:vertical {
-    background: #ffffff; width: 14px; height: 14px; margin: 0 -4px; border-radius: 7px;
+    background: $text; border: 2px solid $surface; width: 12px; height: 12px;
+    margin: 0 -5px; border-radius: 7px;
 }
 QSlider::handle:vertical:hover { background: $accent_hover; }
+QSlider#EqualizerSlider::groove:vertical { width: 6px; }
+QSlider#EqualizerSlider::handle:vertical { width: 14px; height: 14px; margin: 0 -5px; }
 
 QComboBox {
     background: $surface_alt; border: 1px solid $border; border-radius: 6px; padding: 7px 10px;

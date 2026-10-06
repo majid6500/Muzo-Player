@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton,
     QSlider, QVBoxLayout,
 )
 
 from app.core.player_service import PlayerService
+from app.ui.theme.window_chrome import apply_native_titlebar_theme
 
 
 class EqualizerDialog(QDialog):
@@ -52,6 +54,7 @@ class EqualizerDialog(QDialog):
             gain_label = QLabel(self._format_gain(gain))
             gain_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             slider = QSlider(Qt.Orientation.Vertical)
+            slider.setObjectName("EqualizerSlider")
             slider.setRange(-120, 120)
             slider.setValue(round(gain * 10))
             slider.setTickPosition(QSlider.TickPosition.TicksBothSides)
@@ -84,6 +87,10 @@ class EqualizerDialog(QDialog):
         self._preset.currentIndexChanged.connect(self._on_preset_changed)
         reset_button.clicked.connect(lambda: self._preset.setCurrentText("Flat"))
         close_button.clicked.connect(self.accept)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        apply_native_titlebar_theme(self)
 
     def _on_gain_changed(self, band: int, value: int) -> None:
         self._gain_labels[band].setText(self._format_gain(value / 10))
